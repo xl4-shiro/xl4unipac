@@ -1,0 +1,439 @@
+* Features
++ Generate C codes from a text configuration file
++ Various types of variables, array of values and structured variables are supported
++ Statically configured variables and dynamically configured variables
++ IPC with Unix Domain mode sockets or UDP sockets
+
+* Installation
+This project consists of an executable python script and some template files.
+Therefore no build is needed.\\
+
+For the installation, just run './autogen.sh; ./configure; make install'.
+
+To use in your projects, it requires 'xl4unibase'
+and 'xl4combase' libraries to be linked.\\
+
+'make check' generates sample_*.c, sample_*.h and sample_ipcclient.
+Looking at 'sample_defaults.cfg' and the generated C codes, it will help to understand how the
+script works to generate the codes.\\
+
+'sample_ipcconfigs_manual_test r'(a parameter 'r' on the command line) runs an IPC server.
+'sample_ipcclient' connects to the server.  You can check IPC client functions by this running.
+
+* A Simple Example
+To run a simple example, it is only one file you need to write from scratch.
+** write a build time configuration file
+Write a 'hello.cfg' file, which has simple 5 variables as the configuration items.
+
+#+BEGIN_SRC sh
+------------------------------------------------------------
+PORT1 1000 IR # port number 1, IPC readable but not changeable
+IP1 192,168,1,1 IR # IP Address 1, IPC readable but not changeable
+PORT2 1001 IRW # port number 2, IPC readable and changeable
+IP2 192,168,1,2 IRW # IP Address 2, IPC readable and changeable
+MES "two ports are defined"[128] IRW # 128 char space of a string
+------------------------------------------------------------
+#+END_SRC
+the first column is a name of a variable.\\
+the second column is a value.\\
+the third column is IPC flags, IR:IPC readable, IW:IPC writable,\\
+IRW or I: IPC readable and writable
+
+** generate C codes from the build time configuration file
+Run a command as follows:
+
+#+BEGIN_SRC sh
+------------------------------------------------------------
+$ up_genconf.py -i hello.cfg --hfile --cfile --ipcfile --cfile --clfile \
+--srvfile -m hello.conf -p hello
+------------------------------------------------------------
+#+END_SRC
+It generate the following files:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+hello_configs.h
+hello_configs.c
+hello_ipcconfigs.h
+hello_ipcconfigs.c
+hello_ipcserver.c
+hello_ipcclient.c
+------------------------------------------------------------
+#+END_SRC
+
+** build an IPC server and an IPC client
+#+BEGIN_SRC sh
+------------------------------------------------------------
+cc -Wall -DUB_LOGCAT=2 -c -o hello_configs.o hello_configs.c
+cc -Wall -DUB_LOGCAT=2 -c -o hello_ipcconfigs.o hello_ipcconfigs.c
+cc -Wall -DUB_LOGCAT=2 -c -o hello_ipcserver.o hello_ipcserver.c
+cc -o hello_server hello_ipcserver.o hello_configs.o hello_ipcconfigs.o \
+-lx4unibase -lx4combase -lpthread
+cc -Wall -DUB_LOGCAT=2 -c -o hello_ipcclient.o hello_ipcclient.c
+cc -o hello_client hello_ipcclient.o hello_configs.o hello_ipcconfigs.o \
+-lx4unibase -lx4combase -lpthread
+------------------------------------------------------------
+#+END_SRC
+
+** edit a runtime configuration file
+A runtime configuration file: hello.conf has been generated the command above.
+In the file all the items are commented out, so that the application starts
+with the default values which is configured in the build time configuration file.
+
+As an example, let's edit 'hello.conf' and update as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+# port number 1, IPC readable but not changeable
+#PORT1 1000
+
+# IP Address 1, IPC readable but not changeable
+IP1 192,168,1,10
+
+# port number 2, IPC readable and changeable
+#PORT2 1001
+
+# IP Address 2, IPC readable and changeable
+#IP2 192,168,1,2
+
+# 128 char space of a string
+#MES "two ports are defined"
+------------------------------------------------------------
+#+END_SRC
+
+This changes 'IP1' from '192.168.1.1' to '192.168.1.10'.\\
+The runtime configuration file can't change the IPC flags.
+
+To create a new runtime configuration file from a running application,
+call 'hellowrite_config_file'.
+
+** run the IPC server and the IPC client
+#+BEGIN_SRC sh
+------------------------------------------------------------
+[server]$ ./hello_server
+unibase-1.1.0-392f063
+INF:combase:cb_ipcsocket_init:combase-1.1.0-ccfdddb
+
+[client]$  ./hello_client
+unibase-1.1.0-392f063
+INF:combase:cb_ipcsocket_init:combase-1.1.0-ccfdddb
+------------------------------------------------------------
+#+END_SRC
+
+** read variable values on the client side
+#+BEGIN_SRC sh
+------------------------------------------------------------
+([client] hit return)
+0:PORT1(R)  1:IP1(R)  2:PORT2(RW)  3:IP2(RW)
+4:MES(RW)
+
+q:quit, b:binary mode, t:text mode,
+l:read dynamically registered variables, Return:print variable list
+ITEM_NUMBER [-i index] [-f field_index] [-u update_value]
+------------------------------------------------------------
+#+END_SRC
+It shows 5 variables:'0:PORT1(RW)  1:IP1(RW)  2:PORT2(RW)  3:IP2(RW)  4:MES(RW)'\\
+To see the first variable 'PORT1', enter '0'
+#+BEGIN_SRC sh
+------------------------------------------------------------
+0
+Read: PORT1 1000
+------------------------------------------------------------
+#+END_SRC
+To see the second variable 'IP1', enter '1'
+#+BEGIN_SRC sh
+------------------------------------------------------------
+1
+Read: IP1 192,168,1,10
+------------------------------------------------------------
+#+END_SRC
+
+** change variable values on the client side
+To change variable 'PORT2' from 1001 to 2001, 'IP2' from 192,168,1,2  to 0,0,0,0
+#+BEGIN_SRC sh
+------------------------------------------------------------
+2 -u 2001
+3 -u 0,0,0,0
+------------------------------------------------------------
+#+END_SRC
+Read back the changed variables,
+#+BEGIN_SRC sh
+
+------------------------------------------------------------
+2
+Read: PORT2 2001
+3
+Read: IP2 0,0,0,0
+------------------------------------------------------------
+#+END_SRC
+Trying to change 'PORT1' or 'IP1' can't be successful, becuase they don't
+have 'W' flag in the build configuration file
+
+* An Array variable Example
+** write a build time configuration file
+Write a 'helloa.cfg' file as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+Variable_A1 0,1,2,3 IRW # array of 4 int32_t integers
+Variable_A2 1a:2b:3c:4d:5e:6f IRW # array like a mac address: array of uint8_t integers
+Variable_A3 {10:21:32:43:54:65},{1a:2b:3c:4d:5e:6f} IRW # array of 2 mac addresses
+Variable_A4 [16]100 IRW # array of 16 integers
+------------------------------------------------------------
+#+END_SRC
+Building 'helloa_server' and 'helloa_client' is the same as the way in
+'A Simple Example' section.
+
+** change array variables from the client
+run 'helloa_server' and 'helloa_client'.\\
+the client shows the variable as follows:
+
+#+BEGIN_SRC sh
+------------------------------------------------------------
+[client]$ ./helloa_client
+unibase-1.1.0-392f063
+INF:combase:cb_ipcsocket_init:combase-1.1.0-ccfdddb
+
+0:Variable_A1(RW)  1:Variable_A2(RW)  2:Variable_A3(RW)  3:Variable_A4(RW)
+
+q:quit, b:binary mode, t:text mode,
+l:read dynamically registered variables, Return:print variable list
+ITEM_NUMBER [-i index] [-f field_index] [-u update_value]
+----------
+0
+Read: Variable_A1 0,1,2,3
+1
+Read: Variable_A2 1A:2B:3C:4D:5E:6F
+2
+Read: Variable_A3 {10:21:32:43:54:65},{1A:2B:3C:4D:5E:6F}
+3
+Read: Variable_A4 100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100
+------------------------------------------------------------
+#+END_SRC
+Change some of array variables
+
+#+BEGIN_SRC sh
+------------------------------------------------------------
+0 -u 0,10,20,30 # this updates all 4 values
+0
+Read: Variable_A1 0,10,20,30
+0 -i 2 -u 200 # this updates the value of index=2
+0
+Read: Variable_A1 0,10,200,30
+2 -i 0 -u 0:1 # this updates the first 2 bytes of index=0
+2
+Read: Variable_A3 {00:01:32:43:54:65},{1A:2B:3C:4D:5E:6F}
+#+END_SRC
+
+* A Struct variable Example
+** write a build time configuration file
+Write a 'hellob.cfg' file as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+# define {double,char[10],char,char,bool, 3 integers, 64-bit integer}
+# and assign the values
+StructA-Variable_B1 {3.14,"good"[10],'X','Y',true,{3,2,1},100L} IRW
+# the same struct, end parts of fields are not defined
+StructA-Variable_B2 {2.7,"nice",'a','b',false} IRW
+# define new sturct
+StructB-Variable_C1 [3]{4000,{192,168,10,1},"p1"} IRW
+------------------------------------------------------------
+#+END_SRC
+Building 'hellob_server' and 'hellob_client' is the same as the way in
+'A Simple Example' section.
+
+** change struct variables from the client
+run 'hellob_server' and 'hellob_client'.
+On the client side console, it works as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+[client]$ ./hellob_client
+unibase-1.1.0-392f063
+INF:combase:cb_ipcsocket_init:combase-1.1.0-2133d13
+
+0:Variable_B1(RW)  1:Variable_B2(RW)  2:Variable_C1(RW)
+
+q:quit, b:binary mode, t:text mode,
+l:read dynamically registered variables, Return:print variable list
+ITEM_NUMBER [-i index] [-f field_index] [-u update_value]
+----------
+0
+Read: Variable_B1 {3.140000,"good",'X','Y',true,{3,2,1},100}
+1
+Read: Variable_B2 {2.700000,"nice",'a','b',false,{0,0,0},0}
+2
+Read: Variable_C1 {4000,{192,168,10,1},"p1"},{4000,{192,168,10,1},"p1"},{4000,{192,168,10,1},"p1"}
+0 -f 1 -u "bad" # this updates Variable_B1.field1 to "bad"
+0 -f 6 -u 200 # this updates Variable_B1.field6 to 200
+0
+Read: Variable_B1 {3.140000,"bad",'X','Y',true,{3,2,1},200}
+# update index=1 and index=2 of Variable_C1
+2 -i 1 -f 1 -u {192,168,10,2}
+2 -i 1 -f 2 -u "p2"
+2 -i 2 -f 1 -u {192,168,10,3}
+2 -i 2 -f 2 -u "p3"
+2
+Read: Variable_C1 {4000,{192,168,10,1},"p1"},{4000,{192,168,10,2},"p2"},{4000,{192,168,10,3},"p3"}
+------------------------------------------------------------
+#+END_SRC
+
+* dynamic registration of variables
+** back to the the first 'A Simple Example', and add dynamic registration
+Open 'hello_ipcserver.c'; in the main function the code is as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+	...
+	helloipcserver_init("/tmp/hello_ipcconf", 0, true);
+	helloipcserver_set_update_cb(ipc_update_cb, NULL);
+	read(0, &c, 1);
+	helloipcserver_close();
+	...
+------------------------------------------------------------
+#+END_SRC
+It is just waiting an input from console to close the application.
+
+Now, add dynamic registration before the 'read'.
+#+BEGIN_SRC sh
+------------------------------------------------------------
+	...
+	helloipcserver_init("/tmp/hello_ipcconf", 0, true);
+	helloipcserver_set_update_cb(ipc_update_cb, NULL);
+	{
+		int32_t p3=1002;
+		int32_t ip3[4]={192,168,1,3};
+		helloitem_extend_t eid1={"PORT3", &p3,
+			{sizeof(int32_t), 1, 1, VT_INT32_T}, UPIPC_RW};
+		helloitem_extend_t eid2={"IP3", &ip3,
+			{sizeof(int32_t), 1, 4, VT_INT32_T}, UPIPC_RW};
+		helloregister_extend_item(&eid1);
+		helloregister_extend_item(&eid2);
+	}
+	read(0, &c, 1);
+	helloipcserver_close();
+	...
+------------------------------------------------------------
+#+END_SRC
+
+** read and write dynamically registered variables
+run 'hello_server' and 'hello_client'.
+On the client side console, it works as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+[client]$ ./hello_client
+unibase-1.1.0-392f063
+INF:combase:cb_ipcsocket_init:combase-1.1.0-2133d13
+
+0:PORT1(RW)  1:IP1(RW)  2:PORT2(RW)  3:IP2(RW)
+
+q:quit, b:binary mode, t:text mode,
+l:read dynamically registered variables, Return:print variable list
+ITEM_NUMBER [-i index] [-f field_index] [-u update_value]
+----------
+l # 'l' command reads the dynamically registered variables
+update 2 dynamically registered variables
+
+0:PORT1(RW)  1:IP1(RW)  2:PORT2(RW)  3:IP2(RW)
+10000:PORT3(RW)  10001:IP3(RW)  # the dynamically registered variables starts from '10000'
+
+q:quit, b:binary mode, t:text mode,
+l:read dynamically registered variables, Return:print variable list
+ITEM_NUMBER [-i index] [-f field_index] [-u update_value]
+----------
+10000
+Read: PORT3 1002
+10001
+Read: IP3 192,168,1,3
+10000 -u 2002
+10001 -i 2 -u 2
+10000
+Read: PORT3 2002
+10001
+Read: IP3 192,168,2,3
+------------------------------------------------------------
+#+END_SRC
+
+*In the current version, struct variables can't be registered dynamically.*
+* explain some of functions
+Look at the generated '*_configs.h' and '*_ipcconfigs.h'.
+* variable/value registration reference
+*Value definition part can't include space characters other than inside of double/single quoted area.*
+
+** Number
++ 10  -- int32_t type value
++ 10Y  -- int8_t type value
++ 10S  -- int16_t type value
++ 10L  -- int64_t type value
++ 0x10  -- uint32_t type value in hex
++ 0x10Y  -- uint8_t type value in hex
++ 0x10S  -- uint16_t type value in hex
++ 0x10L  -- uint64_t type value in hex
++ 2.71828  -- double type value
++ 2.71828F  -- float type value
+
+** charcter
++ 'a' -- char type value
++ '\0' -- null
+
+** string
++ "abc"  -- 4 bytes of char (null is added)
++ "abc"[10]  -- 10 bytes of char (null is added at 4th byte)
+
+** bool
++ true
++ false
+
+** array
+*All elements must have the same type*
++ 10,20  -- int32_t type value array
++ 10S,20S  -- int16_t type value array
++ 10:20  -- uint8_t type value array in hex format
++ 1000:2000  -- uint16_t type value array in hex format
++ {10,20},{30,40}  -- int32_t type value 2d-array
++ [4]10 -- the same as 10,10,10,10
++ [4]{10,20} -- the same as {10,20},{10,20},{10,20},{10,20}
++ 'a','b','\0' -- char type value array
++ [2]"xyz"[6]  -- the same as "xyz"[6],"xyz"[6]
+
+* struct registration reference
+struct is registered at the first appearance in the buid time configuration file.\\
+StructA-VariableA definition_assignment: this defines 'StructA'\\
+StructA-VariableB definition_assignment: the second appearance must follow already defined StructA
+
+When thre are no field name definitions, 'f0','f1','f2',,, are automatically defined.
+#+BEGIN_SRC sh
+------------------------------------------------------------
+StructA:fname fieldA,fieldB,fieldC
+------------------------------------------------------------
+#+END_SRC
+This defines 'fieldA', 'fieldB', and 'fieldC' as the first 3 field names.
+If there are more fields, 'f3','f4',,, are used to continue.
+
+The field name definition can be either before or after the struct definition.
+
+** definition_assignment
++ {variable1,variable2,,,}
++ [3]{variable1,variable2,,,} -- 3 array of the struct
+* override variable values in a runtime configuration file
++ VariableA Value1  -- assign a new 'value1' on 'VariableA'
++ VariableB[0] Value2  -- assign a new 'value2' on 'VariableB' index=0
++ VariableB[1] Value3  -- assign a new 'value3' on 'VariableB' index=1
++ VariableC.f2 Value4  -- assign a new 'value4' on 'VariableC' field index=2
++ VariableD[2].f1 Value5  -- assign a new 'value5' on 'VariableD' index=2 and field index=1
+* use in non-threading mode
+In examples above, the IPC server uses threading mode.
+
+To run in non-threading mode, add '--ntfile' with 'up_genconf.py'.
+For the first simple example, the command runs as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+$ up_genconf.py -i hello.cfg --hfile --cfile --ipcfile --cfile --clfile \
+--srvfile -m hello.conf -p hello --ntfile
+------------------------------------------------------------
+#+END_SRC
+It additionary generates 'hello_non_thread.h'.
+Use this file in the compiler parameters as follows:
+#+BEGIN_SRC sh
+$ cc -DCOMBASE_NO_THREAD include hello_non_thread.h ...
+#+END_SRC
+
+The IPC server program is responsible to call 'helloipcserver_receive' with
+catching an read event on the fd.
+
+The fd can be got by calling 'helloget_ipcfd'
