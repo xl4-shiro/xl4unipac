@@ -93,17 +93,51 @@ sample_ipcclient_CFLAGS = $(AM_CFLAGS)
 sample_ipcclient_LDADD = -lx4unibase -lx4combase
 
 doc: $(PACKAGENAME)_usersguide.pdf
-$(PACKAGENAME)_usersguide.pdf: README.org
-	cp $(DOC_DIR)/excelfore_logo.png .
-	cat $(DOC_DIR)/xl4_usersguide_template.org $(srcdir)/README.org > \
-	$(PACKAGENAME)_usersguide.org
+TARGET_PDF=$(PACKAGENAME)_usersguide.pdf
+RESOURCE_FILES=excelfore_logo.png xl4_usersguide_template.org
+$(RESOURCE_FILES):
+	@tddir=$(DOC_DIR); \
+	if [ ! -f $${tddir}/$@ ]; then \
+		tddir=$${tddir/\/usr/\/usr\/local}; \
+	fi; \
+	if [ ! -f $${tddir}/$@ ]; then \
+		echo "$${tddir}/excelfore_logo.png doesn't exist"; \
+		exit 1;\
+	fi; \
+	cp $${tddir}/$@ .
+$(PACKAGENAME)_usersguide.org: $(RESOURCE_FILES) README.org
+	cat xl4_usersguide_template.org $(srcdir)/README.org > $(PACKAGENAME)_usersguide.org
 	sed -i "s:\\\\textcolor{cyan}{Confidential}::" $(PACKAGENAME)_usersguide.org
 	sed -i "s/XL4-DOCUMENT-TITLE/$(PACKAGENAME) Usersguide/" $(PACKAGENAME)_usersguide.org
 	sed -i "s/XL4-DOCUMENT-FOOTER-TITLE/$(PACKAGENAME) Usersguide/" \
 	$(PACKAGENAME)_usersguide.org
 	DOCDATE=`git show -s --format=%ci HEAD | sed -r "s/(\S*).*/\1/"`; \
 	sed -i "s/XL4-DOCUMENT-DATE/$${DOCDATE}/g" $(PACKAGENAME)_usersguide.org
+
+$(TARGET_PDF): $(PACKAGENAME)_usersguide.org
 	emacs xl4unipac_usersguide.org --batch -f org-latex-export-to-pdf --kill
 
+install-pdf-local: $(TARGET_PDF)
+	install -d $(DESTDIR)$(docdir)
+	$(INSTALL_DATA) $^ $(DESTDIR)$(docdir)/
+uninstall-pdf: $(TARGET_PDF)
+	rm -rf $(DESTDIR)$(docdir)/*.pdf
+	if [ -d $(DESTDIR)$(docdir) -a -z "`ls -A $(DESTDIR)$(docdir)`" ]; then \
+		rmdir $(DESTDIR)$(docdir); \
+	fi
+
 clean-generic:
+	rm -f *.pdf *.tex *.org
 	cd $(srcdir); rm -f $(GENERATED_CODES)
+
+VALGRIND=valgrind
+check-mem: $(TESTS)
+	for test in $(TESTS) ; do \
+	./libtool --mode=execute $(VALGRIND) \
+		--tool=memcheck --leak-check=full --leak-resolution=low \
+		--track-origins=yes --track-fds=yes --time-stamp=yes \
+		--error-exitcode=1 --show-leak-kinds=all ./$${test}; \
+	done
+
+deb:
+	@cd $(srcdir); make -f debian.make

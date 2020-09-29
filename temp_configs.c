@@ -442,7 +442,7 @@ static int get_strvtype_values(int vtype, int vsize, int elen, int vnum, int rsi
 static int strstructitem_values(int item, int vtype, void **values,
 				int elen, char **svalues, int *svalsize)
 {
-	int vsize, vnum, fvtype, i, rn, rnn, foffset;
+	int vsize, vnum, fvtype, i, rn, rnn, foffset, update_size;
 	int findex=0;
 	int ssize=0;
 	bool verr=false;
@@ -456,8 +456,8 @@ static int strstructitem_values(int item, int vtype, void **values,
 		if(rnn<=0) rnn=1;
 		fvtype=_CONFPREFIX_struct_field_vtype(vtype, findex, &vsize, &elen,
 						      &vnum, &foffset);
-		ssize=foffset;
 		if(fvtype==VT_INVALID) break;
+		ssize=foffset;
 		if(!verr){
 			i=get_strvtype_values(fvtype, vsize, elen, vnum, ssize,
 					      values, svalues, svalsize);
@@ -471,14 +471,21 @@ static int strstructitem_values(int item, int vtype, void **values,
 		findex+=rnn;
 		check_first_char(svalues, svalsize, ',');
 	}
+	update_size=ssize;
 	ssize=_CONFPREFIX_conf_get_item_element_size(item);
 	if(rn>1){
 		*values=realloc(*values, ssize*rn);
+		memset(*values+update_size, 0x0, ssize-update_size);
 		for(i=1;i<rn;i++){
-			memcpy(*values+i*ssize, *values, ssize);
+			memcpy(*values+i*ssize, *values, update_size);
+			memset(*values+i*ssize+update_size, 0x0, ssize-update_size);
 		}
 		ssize=ssize*rn;
+	}else{
+		*values=realloc(*values, ssize);
+		memset(*values+update_size, 0x0, ssize-update_size);
 	}
+
 	if(fb && !check_first_char(svalues, svalsize, '}')) return -1;
 	return ssize;
 }

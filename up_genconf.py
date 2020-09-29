@@ -292,6 +292,7 @@ class ValueUnit(list):
                 k=len(i)
                 continue
             if i.__class__==ValueAtom:
+                if k.__class__ != str : return False
                 if k==i[0]: continue # the same ValueAtom[0] type
                 if k.find(ValueAtom.STRTPREF)==0 and i[0].find(ValueAtom.STRTPREF)==0: continue
                 return False
@@ -447,7 +448,7 @@ class ScanConfigFile(object):
     v['values'] has a ValueUnit instance
     '''
     def __init__(self, fname="defaults.cfg", tfname=None):
-        inf=open(fname)
+        inf=self.file_preproc(fname)
         if tfname:
             self.toutf=open(tfname, "w")
         else:
@@ -527,8 +528,28 @@ class ScanConfigFile(object):
         inf.close()
         if self.toutf: self.toutf.close()
 
+    def file_preproc(self, fname):
+        inf=open(fname)
+        replace_words=[]
+        while True:
+            line=inf.readline()
+            if line=='': break
+            items=line.split()
+            if len(items)<3: continue
+            if items[0]!="#define": continue
+            replace_words.append((items[1],items[2]))
+        inf.seek(0)
+        rdata=inf.read()
+        for rw in replace_words:
+            rdata=rdata.replace(rw[0], rw[1])
+        outf=StringIO()
+        outf.write(rdata)
+        outf.seek(0)
+        inf.close()
+        return outf
+
     def tempconf_write(self, rei, reo, line, sdq, comment):
-        if comment: self.toutf.write("#%s\n" % comment)
+        if comment and comment.find("define ")!=0: self.toutf.write("#%s\n" % comment)
         if rei==1:
             self.toutf.write(line)
             return
@@ -873,6 +894,7 @@ class ConfigCodeOutput(ConfigOutput):
                 self.outf.write("\t\t\t*foffset=(void*)&a.%s-(void*)&a;\n" % f[3])
                 self.outf.write("\t\t\treturn %s;\n" % StructDefinitions.get_vtype_numstr(f[0]))
             self.outf.write("\t\t};\n")
+            self.outf.write("\t\tbreak;\n")
             self.outf.write("\t}\n")
         self.outf.write("\tdefault:\n")
         self.outf.write("\t\tbreak;\n")
@@ -899,6 +921,7 @@ class ConfigCodeOutput(ConfigOutput):
 
                 self.outf.write("\t\t\treturn 0;\n")
             self.outf.write("\t\t}\n")
+            self.outf.write("\t\tbreak;\n")
             self.outf.write("\t}\n")
         self.outf.write("\tdefault:\n")
         self.outf.write("\t\tbreak;\n")

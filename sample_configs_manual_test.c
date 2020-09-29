@@ -227,9 +227,14 @@ int struct_update(void)
 		if(strcmp(v1->f8[2],"Z")) return -1;
 	}
 	// return back to the original values
-	a="[10]{10,\"x\",1.0,true,{1,2,3},{10,20,30}}";
+	a="[10]{10,\"x\",1.0,true,{1,2,3},10,20,30}}";
 	ssize=strlen(a)+1;
-	samplestrvname_update("VALUE_R", 0, -1, &a, &ssize);
+	if(samplestrvname_update("VALUE_R", 0, -1, &a, &ssize)) return -1;
+	v1=(ABC_01_t *)sampleconf_get_item_index(VALUE_R, 0);
+	if(memcmp(v1->f8,"\x00\x00\x00\x00\x00\x00\x00\x00\x00",9)){
+		printf("undefined area should be initialized to zero\n");
+		return -1;
+	}
 
 	printf("%s:PASS\n",__func__);
 	return 0;
