@@ -77,7 +77,7 @@ static int single_hex_value_to_string(int bsize, char **vstr, int *vstrsize, int
 	if(res<0) return -1;
 	*vpi+=res;
 	*valsize-=bsize;
-	*values+=bsize;
+	*values=((char*)(*values))+bsize;
 	return 0;
 }
 
@@ -126,12 +126,12 @@ char *_CONFPREFIX_item_values_to_string(int item, int index, int findex,
 	int vpi;
 	if(!values) return NULL;
 	if(valsize<=0) return NULL;
-	svsize=_CONFPREFIX_conf_get_item_value_size(item);
+	svsize=_CONFPREFIX_conf_get_item_value_size(((_CONFPREFIX__config_item_t)item));
 	if(svsize<0) return NULL;
-	elen=_CONFPREFIX_conf_get_item_element_num(item);
+	elen=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item));
 	if(index>=0){
 		if(dnonidxed){
-			values+=index*svsize;
+			values = ((char*)values)+(index*svsize);
 			valsize-=index*svsize;
 			elen-=index;
 		}else{
@@ -143,8 +143,8 @@ char *_CONFPREFIX_item_values_to_string(int item, int index, int findex,
 		return NULL;
 	}
 
-	vnum=_CONFPREFIX_conf_get_item_value_num(item);
-	vtype=_CONFPREFIX_conf_get_item_vtype(item);
+	vnum=_CONFPREFIX_conf_get_item_value_num(((_CONFPREFIX__config_item_t)item));
+	vtype=_CONFPREFIX_conf_get_item_vtype(((_CONFPREFIX__config_item_t)item));
 	vstr=ub_malloc_or_die(__func__, vstrsize);
 	vpi=0;
 	while(valsize>=svsize && res==0){
@@ -157,7 +157,7 @@ char *_CONFPREFIX_item_values_to_string(int item, int index, int findex,
 			if(fvtype==VT_INVALID){
 				res=-1;
 			}else{
-				values+=foffset;
+				values = ((char*)values)+foffset;
 				valsize-=foffset;
 				res=field_values_to_string(fvtype, elen, vnum, &vstr, &vstrsize,
 							   &vpi, &values, &valsize);
@@ -182,7 +182,7 @@ char *_CONFPREFIX_item_values_to_string(int item, int index, int findex,
 			}
 			append_char(&vstr, &vstrsize, &vpi, '}');
 			findex=-1;
-			values+=svsize;
+			values = ((char*)values)+svsize;
 			valsize-=svsize;
 		}
 	}
@@ -246,12 +246,12 @@ static uint8_t *ipc_get_variable_data_b(int item, int index, int findex, int *si
 	void *values;
 	_CONFPREFIX_ipcdata_t *ipd=NULL;
 	int foffset=0;
-	values=_CONFPREFIX_conf_get_item(item);
+	values=_CONFPREFIX_conf_get_item(((_CONFPREFIX__config_item_t)item));
 	if(!values) return NULL;
 
-	esize=_CONFPREFIX_conf_get_item_element_size(item);
+	esize=_CONFPREFIX_conf_get_item_element_size(((_CONFPREFIX__config_item_t)item));
 	tsize=esize;
-	if(index==-1) tsize*=_CONFPREFIX_conf_get_item_element_num(item);
+	if(index==-1) tsize*=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item));
 
 	ipd=ub_malloc_or_die(__func__, sizeof(_CONFPREFIX_ipcdata_t)+tsize-4);
 	if(read_notice=='R')
@@ -260,11 +260,11 @@ static uint8_t *ipc_get_variable_data_b(int item, int index, int findex, int *si
 		ipd->cmd=_CONFPREFIX_IPCCMD_NOTICE;
 
 	if(index>0){
-		values+=index*esize;
+		values = ((char*)values)+(index*esize);
 	}
 	if(findex>=0){
 		int vtype, fvtype, vsize, elen, vnum;
-		vtype=_CONFPREFIX_conf_get_item_vtype(item);
+		vtype=_CONFPREFIX_conf_get_item_vtype(((_CONFPREFIX__config_item_t)item));
 		fvtype=_CONFPREFIX_struct_field_vtype(vtype, findex, &vsize, &elen,
 						&vnum, &foffset);
 		if(fvtype==VT_INVALID) goto erexit;
@@ -303,14 +303,14 @@ static uint8_t *ipc_get_variable_data(_CONFPREFIX_ipcserver_t *isvd,
 		return ipc_get_variable_data_b(item, index, findex, size, addr, read_notice);
 	vname=_CONFPREFIX_config_item_strings(item);
 	if(!vname) return NULL;
-	values=_CONFPREFIX_conf_get_item(item);
+	values=_CONFPREFIX_conf_get_item(((_CONFPREFIX__config_item_t)item));
 	if(!values) return NULL;
-	tsize=_CONFPREFIX_conf_get_item_element_size(item);
+	tsize=_CONFPREFIX_conf_get_item_element_size(((_CONFPREFIX__config_item_t)item));
 	if(index<0){
-		tsize*=_CONFPREFIX_conf_get_item_element_num(item);
+		tsize*=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item));
 	}else{
-		if(index>_CONFPREFIX_conf_get_item_element_num(item)) return NULL;
-		values+=tsize*index;
+		if(index>_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item))) return NULL;
+		values = ((char*)values)+(tsize*index);
 	}
 	UB_LOG(UBL_DEBUGV, "%s:vname=%s index=%d findex=%d tsize=%d\n",
 	       __func__, vname, index, findex, tsize);
@@ -368,7 +368,7 @@ static int ipc_sendback_to_query_evlist(_CONFPREFIX_ipcserver_t *isvd, bool text
 	esize=sizeof(_CONFPREFIX_item_extend_t);
 	en=_CONFPREFIX_get_extend_itemlist(&edata);
 	if(en<0) return -1;
-	for(i=0;i<en && sp<sizeof(sdata);i++) {
+	for(i=0;i<en && sp<(int)sizeof(sdata);i++) {
 		reid=(_CONFPREFIX_item_extend_t *)(edata+esize*i);
 		if(textmode){
 			if(i>0) sdata[sp++]=',';
@@ -378,7 +378,7 @@ static int ipc_sendback_to_query_evlist(_CONFPREFIX_ipcserver_t *isvd, bool text
 			if(res<=0) break;
 			sp+=res;
 		}else{
-			if(sizeof(sdata)-sp<esize) break;
+			if((int)sizeof(sdata)-sp<esize) break;
 			memcpy(sdata+sp, reid, esize);
 			sp+=esize;
 			ipd->size+=esize;
@@ -416,7 +416,7 @@ static int ipc_receive_textmode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr *
 	size-=1;
 	if(_CONFPREFIX_variable_from_str(&item, &index, &findex,
 					 (char**)&rdata, &size)) return -1;
-	ipcon=_CONFPREFIX_conf_get_ipcon(item);
+	ipcon=_CONFPREFIX_conf_get_ipcon(((_CONFPREFIX__config_item_t)item));
 	if(cmd==_CONFPREFIX_IPCCMD_WRITE){
 		if(!(ipcon & UPIPC_W)){
 			UB_LOG(UBL_DEBUG, "item=%d is not writable through IPC\n", item);
@@ -447,7 +447,7 @@ static int ipc_receive_binarymode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr
 	uint8_t ipcon;
 	if(ipd->magic!=_CONFPREFIX_IPCDATA_BMAGIC) return -1;
 	cb_ipcsocket_set_commode(isvd->ipcsd, addr, CB_IPCCLIENT_BINARY);
-	ipcon=_CONFPREFIX_conf_get_ipcon(ipd->item);
+	ipcon=_CONFPREFIX_conf_get_ipcon(((_CONFPREFIX__config_item_t)ipd->item));
 	if(ipd->cmd==_CONFPREFIX_IPCCMD_READ){
 		if(!(ipcon & UPIPC_R)) {
 			UB_LOG(UBL_DEBUG, "item=%d is not readable through IPC\n", ipd->item);
@@ -466,7 +466,12 @@ static int ipc_receive_binarymode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr
 		res=_CONFPREFIX_item_index_update(ipd->item, ipd->index, ipd->findex,
 						  ipd->data, ipd->size);
 		_CONFPREFIX_ipcserver_unlock();
-		if(!res && isvd->update_cb)
+		if(res){
+			UB_LOG(UBL_WARN, "%s:item=%d , index=%d, findex=%d, can't be updated\n",
+			       __func__, ipd->item, ipd->index, ipd->findex);
+			return -1;
+		}
+		if(isvd->update_cb)
 			res=isvd->update_cb(isvd->update_cbdata, ipd->item,
 					    ipd->index, ipd->findex);
 	}else if (ipd->cmd==_CONFPREFIX_IPCCMD_QEVLIST){
@@ -502,9 +507,11 @@ int _CONFPREFIX_ipcserver_init(char *node_ip, uint16_t port, bool thread)
 	}
 	if(!thread) return cb_ipcsocket_getfd(isvd->ipcsd);
 	isvd->threadrun=true;
+#ifndef COMBASE_NO_THREAD
 	if(CB_THREAD_MUTEX_INIT(&isvd->mutex, NULL)) goto erexit;
 	if(CB_THREAD_CREATE(&isvd->thread, NULL, ipc_receiver_proc, isvd)) goto erexit;
 	return cb_ipcsocket_getfd(isvd->ipcsd);
+#endif //!COMBASE_NO_THREAD
 erexit:
 	_CONFPREFIX_ipcserver_close();
 	return -1;
@@ -612,10 +619,10 @@ int _CONFPREFIX_write_config_file(char *fname)
 	for(i=0;i<_CONFPREFIX_CONF_ENUM_LAST_ITEM;i++){
 		vname=_CONFPREFIX_config_item_strings(i);
 		if(!vname) goto erexit;
-		values=_CONFPREFIX_conf_get_item(i);
+		values=_CONFPREFIX_conf_get_item(((_CONFPREFIX__config_item_t)i));
 		if(!values) goto erexit;
-		tsize=_CONFPREFIX_conf_get_item_element_size(i) *
-			_CONFPREFIX_conf_get_item_element_num(i);
+		tsize=_CONFPREFIX_conf_get_item_element_size(((_CONFPREFIX__config_item_t)i)) *
+			_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)i));
 		sval=_CONFPREFIX_item_values_to_string(i, -1, -1, values, tsize, false);
 		if(!sval) goto erexit;
 		fwrite(vname, 1, strlen(vname), outf);

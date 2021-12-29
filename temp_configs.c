@@ -26,6 +26,31 @@
 
 static ub_esarray_cstd_t *item_extends;
 
+#define MAX_CHARS_PER_LINE 1024
+static int _CONFPREFIX_conf_readline(FILE *inf, char *line)
+{
+	char a;
+	int res;
+	int rp=0;
+
+	if(feof(inf)) return 0;
+	while((res=fread(&a, 1, 1, inf))){
+		if(res<0){
+			if(feof(inf)) return 0;
+			UB_LOG(UBL_WARN,"%s:error to read config file\n", __func__);
+			return -1;
+		}
+		if(a=='\n') break;
+		line[rp++]=a;
+		if(rp>=MAX_CHARS_PER_LINE-1){
+			UB_LOG(UBL_WARN,"%s:too long line\n", __func__);
+			return -1;
+		}
+	}
+	line[rp++]=0;
+	return rp;
+}
+
 #define MAX_ITEM_EXTENDS 256
 static void init_item_extends(void)
 {
@@ -182,7 +207,7 @@ static int check_item(int n)
 {
 	if(n<0 || n>=_CONFPREFIX_CONF_ENUM_LAST_ITEM) return -1;
 	return 0;
-};
+}
 
 /*_CONF_GENERATED_*/
 
@@ -290,6 +315,25 @@ int32_t _CONFPREFIX_conf_get_intitem(_CONFPREFIX__config_item_t item)
 	return *((int32_t *)_CONFPREFIX_conf_get_item(item));
 }
 
+int32_t _CONFPREFIX_conf_get_intitem_index(_CONFPREFIX__config_item_t item, int index)
+{
+	int32_t *vp;
+	vp=_CONFPREFIX_conf_get_item_index(item, index);
+	if(!vp) return (int32_t)0x80000000;
+	return *((int32_t*)vp);
+}
+
+bool _CONFPREFIX_conf_get_boolitem(_CONFPREFIX__config_item_t item)
+{
+	if(check_item(item) && item<_CONFPREFIX_ITEM_EXTEND_BASE) return false;
+	if(item>=_CONFPREFIX_ITEM_EXTEND_BASE){
+		if(!item_extends) return false;
+		if(item>=_CONFPREFIX_ITEM_EXTEND_BASE+ub_esarray_ele_nums(item_extends))
+			return false;
+	}
+	return *((bool *)_CONFPREFIX_conf_get_item(item));
+}
+
 int64_t _CONFPREFIX_conf_get_lintitem(_CONFPREFIX__config_item_t item)
 {
 	if(check_item(item) && item<_CONFPREFIX_ITEM_EXTEND_BASE)
@@ -359,7 +403,7 @@ _CONFPREFIX__config_item_t _CONFPREFIX_conf_get_item_num(char *istr)
 	for(i=0;i<en;i++) {
 		_CONFPREFIX_item_extend_t *reid;
 		reid=(_CONFPREFIX_item_extend_t *)ub_esarray_get_ele(item_extends, i);
-		if(!strcmp(reid->name, istr)) return i+_CONFPREFIX_ITEM_EXTEND_BASE;
+		if(!strcmp(reid->name, istr)) return ((_CONFPREFIX__config_item_t)(i+_CONFPREFIX_ITEM_EXTEND_BASE));
 	}
 	return _CONFPREFIX_CONF_ENUM_NON_ITEM;
 }
@@ -379,7 +423,7 @@ int _CONFPREFIX_conf_set_stritem(char *istr, void *v)
 	int item;
 	item=_CONFPREFIX_conf_get_item_num(istr);
 	if(item<0) return -1;
-	return _CONFPREFIX_conf_set_item(item, v);
+	return _CONFPREFIX_conf_set_item(((_CONFPREFIX__config_item_t)item), v);
 }
 
 int _CONFPREFIX_item_index_update(int item, int index, int findex, void *values, int sizev)
@@ -387,15 +431,15 @@ int _CONFPREFIX_item_index_update(int item, int index, int findex, void *values,
 	void *p;
 	int vtype;
 	int elnum=1;
-	if(index>_CONFPREFIX_conf_get_item_element_num(item)) return -1;
+	if(index>_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item))) return -1;
 	if(index<0) index=0;
-	p=_CONFPREFIX_conf_get_item_index(item, index);
+	p=_CONFPREFIX_conf_get_item_index(((_CONFPREFIX__config_item_t)item), index);
 	if(!p) return -1;
-	vtype=_CONFPREFIX_conf_get_item_vtype(item);
+	vtype=_CONFPREFIX_conf_get_item_vtype(((_CONFPREFIX__config_item_t)item));
 	if(findex==-1 || vtype<0 || vtype>=UPSTRING_TYPE_BASE){
-		elnum=_CONFPREFIX_conf_get_item_element_num(item);
+		elnum=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item));
 		elnum-=index;
-		memcpy(p, values, UB_MIN(_CONFPREFIX_conf_get_item_element_size(item)*elnum,sizev));
+		memcpy(p, values, UB_MIN(_CONFPREFIX_conf_get_item_element_size(((_CONFPREFIX__config_item_t)item))*elnum,sizev));
 		return 0;
 	}
 	return _CONFPREFIX_struct_field_update(vtype, findex, p, values, sizev);
@@ -472,7 +516,7 @@ static int strstructitem_values(int item, int vtype, void **values,
 		check_first_char(svalues, svalsize, ',');
 	}
 	update_size=ssize;
-	ssize=_CONFPREFIX_conf_get_item_element_size(item);
+	ssize=_CONFPREFIX_conf_get_item_element_size(((_CONFPREFIX__config_item_t)item));
 	if(rn>1){
 		*values=realloc(*values, ssize*rn);
 		memset(*values+update_size, 0x0, ssize-update_size);
@@ -493,16 +537,16 @@ static int strstructitem_values(int item, int vtype, void **values,
 int _CONFPREFIX_stritem_values(int item, int index, int findex, void **values,
 			       int *foffset, char **svalues, int *svalsize)
 {
-	int vtype, vsize, elen, vnum, fvtype, rsize;
+	int vtype, vsize=0, elen=0, vnum=0, fvtype, rsize;
 	char *sv=*svalues;
 	if(index<0) index=0;
 	*values=NULL;
-	vtype=_CONFPREFIX_conf_get_item_vtype(item);
+	vtype=_CONFPREFIX_conf_get_item_vtype(((_CONFPREFIX__config_item_t)item));
 	if(vtype<0 || vtype>=UPSTRING_TYPE_BASE){
 		// not struct variable
-		vsize=_CONFPREFIX_conf_get_item_value_size(item);
-		elen=_CONFPREFIX_conf_get_item_element_num(item)-index;
-		vnum=_CONFPREFIX_conf_get_item_value_num(item);
+		vsize=_CONFPREFIX_conf_get_item_value_size(((_CONFPREFIX__config_item_t)item));
+		elen=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item))-index;
+		vnum=_CONFPREFIX_conf_get_item_value_num(((_CONFPREFIX__config_item_t)item));
 		rsize=get_strvtype_values(vtype, vsize, elen, vnum, 0,
 					  values, svalues, svalsize);
 	}else if(findex>=0){
@@ -512,7 +556,7 @@ int _CONFPREFIX_stritem_values(int item, int index, int findex, void **values,
 		rsize=get_strvtype_values(fvtype, vsize, elen, vnum, 0,
 					  values, svalues, svalsize);
 	}else{
-		elen=_CONFPREFIX_conf_get_item_element_num(item)-index;
+		elen=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item))-index;
 		rsize=0;
 		*foffset=0;
 		while(elen > 0 && *svalsize>0){
@@ -546,12 +590,12 @@ int _CONFPREFIX_stritem_update(int item, int index, int findex, char **svalues, 
 	int rsize;
 	int foffset=0;
 	void *values;
-	if(index>_CONFPREFIX_conf_get_item_element_num(item)) {
+	if(index>_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item))) {
 		UB_LOG(UBL_ERROR, "%s:item=%d must be wrong: %s\n", __func__, item, *svalues);
 		return -1;
 	}
 	if(index<0) index=0;
-	p=_CONFPREFIX_conf_get_item_index(item, index);
+	p=_CONFPREFIX_conf_get_item_index(((_CONFPREFIX__config_item_t)item), index);
 	if(!p) {
 		UB_LOG(UBL_ERROR, "%s:item=%d, index=%d must be wrong: %s\n",
 		       __func__, item, index, *svalues);
@@ -620,15 +664,14 @@ int _CONFPREFIX_variable_from_str(int *item, int *index, int *findex, char **sva
 int _CONFPREFIX_read_config_file(char *fname)
 {
 	FILE *inf;
-	char *line=NULL;
+	char line[MAX_CHARS_PER_LINE];
 	char *pline;
-	size_t lsize=0;
 	int nr, index, findex, item;
 	int res=0;
 
 	inf=fopen(fname, "r");
 	if(!inf) return -1;
-	while((nr=getline(&line, &lsize, inf))>0){
+	while((nr=_CONFPREFIX_conf_readline(inf, line))>0){
 		pline=line;
 		nr++; // add the last null code
 		_CONFPREFIX_skip_chars(&pline, &nr, ' ', '\t');
@@ -644,8 +687,33 @@ int _CONFPREFIX_read_config_file(char *fname)
 			break;
 		}
 	}
-	if(line) free(line);
 	fclose(inf);
+	return res;
+}
+
+int _CONFPREFIX_read_config_buffer(int conf_num, char *conf_array[])
+{
+	char *pline;
+	int nr, index, findex, item;
+	int res=0;
+
+	for(int idx = 0; idx < conf_num && conf_array[idx]; idx++){
+		pline=conf_array[idx];
+		nr = strlen(pline);
+		nr++; // add the last null code
+		_CONFPREFIX_skip_chars(&pline, &nr, ' ', '\t');
+		if(nr<=1) continue;
+		if(check_first_char(&pline, &nr, '#')) continue;
+		if(_CONFPREFIX_variable_from_str(&item, &index, &findex, &pline, &nr)){
+			res=-1;
+			break;
+		}
+		_CONFPREFIX_skip_chars(&pline, &nr, ' ', '\t');
+		if(_CONFPREFIX_stritem_update(item, index, findex, &pline, &nr)){
+			res=-1;
+			break;
+		}
+	}
 	return res;
 }
 

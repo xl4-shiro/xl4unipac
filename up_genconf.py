@@ -54,7 +54,10 @@ def num_in_bracket(v):
     try:
         a=int(vs)
     except ValueError:
-        return v,1,0
+        try:
+            a=eval(vs)
+        except ValueError:
+            return v,1,0
     return v[n:],a,n
 
 def find_delimiters(v, td='{,:', bd=':,}'):
@@ -915,7 +918,7 @@ class ConfigCodeOutput(ConfigOutput):
             self.outf.write("\t\tswitch(findex){\n")
             for i,f in enumerate(v):
                 self.outf.write("\t\tcase %d:\n" % i)
-                self.outf.write("\t\t\tmemcpy(&v->%s, values, UB_MIN(%s*%d,sizev));\n" %
+                self.outf.write("\t\t\tmemcpy(&v->%s, values, UB_MIN((int)%s*%d,sizev));\n" %
                                 (f[3], StructDefinitions.get_sizeof_str(f[0]),
                                  f[1]*f[2]))
 
@@ -941,7 +944,7 @@ class ConfigCodeOutput(ConfigOutput):
 			for(j=0;j<vnum && usize<*esize;j++){
 				_SETRV_;
 
-				vp+=vs;
+				vp = ((char*)vp) + vs;
 				usize+=vs;
 				*svalsize-=vn-*svalues;
 				*svalues=vn;
@@ -1188,12 +1191,12 @@ static int single_value_to_string(int vtype, char **vstr, int *vstrsize, int *vp
 	}
 	switch(vtype){
 	case VT_BOOL:
-		if(*valsize<sizeof(bool)) return -1;
+		if(*valsize<(int)sizeof(bool)) return -1;
 		if(*((bool *)*values))
 			append_string(vstr, vstrsize, vpi, "true");
 		else
 			append_string(vstr, vstrsize, vpi, "false");
-		*values+=sizeof(bool);
+		*values = ((char*)(*values)) + sizeof(bool);
 		*valsize-=sizeof(bool);
 		break;
 '''
@@ -1219,12 +1222,12 @@ static int single_value_to_string(int vtype, char **vstr, int *vstrsize, int *vp
 
             ctext='''
 	case VT__VTYPEUPPER_:
-		if(*valsize<sizeof(_VTYPE_)) return -1;
+		if(*valsize<(int)sizeof(_VTYPE_)) return -1;
 		res=snprintf(*vstr+*vpi, *vstrsize, _VTYPEPRI_, *((_VTYPE_*)*values));
 		if(res<0) return -1;
 		*vpi+=res;
 		*valsize-=sizeof(_VTYPE_);
-		*values+=sizeof(_VTYPE_);
+		*values = ((char*)(*values)) + sizeof(_VTYPE_);
 		break;
 '''
             ctext=ctext.replace("_VTYPEUPPER_", k.upper())
@@ -1245,7 +1248,7 @@ static int single_value_to_string(int vtype, char **vstr, int *vstrsize, int *vp
 		res=snprintf(*vstr+*vpi, UB_MIN(*vstrsize, n+2), "\\"%s\\"", (char*)*values);
 		*vpi+=res;
 		*valsize-=n;
-		*values+=n;
+		*values = ((char*)(*values)) + n;
 		break;
 	}
 '''

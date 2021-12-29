@@ -136,6 +136,21 @@ void *_CONFPREFIX_conf_get_item_index(_CONFPREFIX__config_item_t item, int index
 int32_t _CONFPREFIX_conf_get_intitem(_CONFPREFIX__config_item_t item);
 
 /**
+ * @brief return int32_t type variable value
+ * @param item	variable
+ * @param index	index
+ * @return 0x80000000:on error, integer number
+ */
+int32_t _CONFPREFIX_conf_get_intitem_index(_CONFPREFIX__config_item_t item, int index);
+
+/**
+ * @brief return bool type variable value
+ * @param item	variable
+ * @return error is returned as false
+ */
+bool _CONFPREFIX_conf_get_boolitem(_CONFPREFIX__config_item_t item);
+
+/**
  * @brief return int64_t type variable value
  * @param item	variable
  * @return 0x8000000000000000:on error, integer number
@@ -172,6 +187,14 @@ _CONFPREFIX__config_item_t _CONFPREFIX_conf_get_item_num(char *istr);
  * @return 0:success, -1:on error
  */
 int _CONFPREFIX_read_config_file(char *fname);
+
+/**
+ * @brief read from array of strings
+ * @param conf_num	number of configuration in the conf array
+ * @param conf_array	array of config strings
+ * @return 0:success, -1:on error
+ */
+int _CONFPREFIX_read_config_buffer(int conf_num, char *conf_array[]);
 
 /**
  * @brief register a new variable dynamically

@@ -126,7 +126,7 @@ static int textmode_cmd_send(int fd, char *sval, char *ud, int index, int findex
 	snprintf(sdata, 1500, "TTTT %c %s%s%s %s", ud[0]?'W':'R', sval, istr, fstr, ud);
 	UB_LOG(UBL_DEBUG, "send cmd=%s\n", sdata);
 	res=write(fd, sdata, strlen(sdata));
-	if(res!=strlen(sdata)) {
+	if(res!=(int)strlen(sdata)) {
 		UB_LOG(UBL_ERROR, "%s:send res=%d\n", __func__, res);
 		return -1;
 	}
@@ -155,7 +155,7 @@ static int binarymode_cmd_send(int fd, int item, char *ud, int index, int findex
 			       __func__, ipcd->item, ipcd->index, ipcd->findex);
 			return -1;
 		}
-		if(rsize>sizeof(sdata)-sizeof(_CONFPREFIX_ipcdata_t)+4){
+		if(rsize>(int)sizeof(sdata)-(int)sizeof(_CONFPREFIX_ipcdata_t)+4){
 			UB_LOG(UBL_ERROR, "%s:data too big\n", __func__);
 			return -1;
 		}
@@ -164,7 +164,7 @@ static int binarymode_cmd_send(int fd, int item, char *ud, int index, int findex
 	}
 	ipcd->size=rsize;
 	res=write(fd, sdata, sizeof(_CONFPREFIX_ipcdata_t)+ipcd->size-4);
-	if(res!=sizeof(_CONFPREFIX_ipcdata_t)+ipcd->size-4) {
+	if(res!=(int)sizeof(_CONFPREFIX_ipcdata_t)+ipcd->size-4) {
 		UB_LOG(UBL_ERROR, "%s:send res=%d\n", __func__, res);
 		return -1;
 	}

@@ -126,7 +126,7 @@ uninstall-pdf: $(TARGET_PDF)
 		rmdir $(DESTDIR)$(docdir); \
 	fi
 
-clean-generic:
+clean-local:
 	rm -f *.pdf *.tex *.org
 	cd $(srcdir); rm -f $(GENERATED_CODES)
 
