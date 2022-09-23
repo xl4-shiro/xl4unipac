@@ -228,7 +228,7 @@ int _CONFPREFIX_get_extend_itemlist(void **data);
  * @param item	variable
  * @return variable name, NULL:on error
  */
-char *_CONFPREFIX_config_item_strings(int item);
+const char *_CONFPREFIX_config_item_strings(int item);
 
 /**
  * @brief _CONFPREFIX_conf_get_item_num + _CONFPREFIX_conf_set_item
@@ -306,5 +306,15 @@ int _CONFPREFIX_stritem_update(int item, int index, int findex, char **svalues, 
  */
 int _CONFPREFIX_variable_from_str(int *item, int *index, int *findex,
 				  char **svalues, int *svalsize);
+
+/**
+ * @brief save persistent flagged data into the file
+ */
+void _CONFPREFIX_persistent_save(void);
+
+/**
+ * @brief restore persistent flagged data from the file
+ */
+void _CONFPREFIX_persistent_restore(void);
 
 #endif

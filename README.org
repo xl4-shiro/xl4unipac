@@ -3,6 +3,7 @@
 + Various types of variables, array of values and structured variables are supported
 + Statically configured variables and dynamically configured variables
 + IPC with Unix Domain mode sockets or UDP sockets
++ save and restore persistent variables
 
 * Installation
 This project consists of an executable python script and some template files.
@@ -437,3 +438,36 @@ The IPC server program is responsible to call 'helloipcserver_receive' with
 catching an read event on the fd.
 
 The fd can be got by calling 'helloget_ipcfd'
+
+* persistent variables
+When 'UNIPAC_PERSISTENT' is defined in the config file, the data is saved in a file
+defined as 'UNIPAC_PERSISTENT'
+To be a persistent variable, add 'P' flag on the third column.
+An example is as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+UNIPAC_PERSISTENT "/var/tmp/xl4unipac_sample"
+VALUE_A 1000 P # VALUE_A is persistent
+------------------------------------------------------------
+#+END_SRC
+
+After reading from a config file, call '*persistent_restore();'
+and before terminating the program, call '*persistent_save();'
+
+An example is as follows:
+#+BEGIN_SRC sh
+------------------------------------------------------------
+sampleread_config_file("sample_defaults.conf");
+samplepersistent_restore();
+...
+update variables
+...
+samplepersistent_save();
+------------------------------------------------------------
+#+END_SRC
+
+For the variables with 'P' flag, the updated contents are restored and
+the values are persistent.
+To reset the values, delete the file defined by UNIPAC_PERSISTENT.
+
+'UNIPAC_PERSISTENT' is configurable at runtime by defining in the conf file.

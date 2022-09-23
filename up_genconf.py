@@ -60,13 +60,23 @@ def num_in_bracket(v):
             return v,1,0
     return v[n:],a,n
 
+def find_quote(v):
+    if v[0]!='"': return 0
+    nn=0
+    while True:
+        qn=v[nn+1:].find('"')
+        if qn<0: return 0
+        if v[nn+qn]!='\\': return nn+qn+1
+        nn=nn+qn+1
+
 def find_delimiters(v, td='{,:', bd=':,}'):
     consumed_chars=0
     tdelim=''
     bdelim=''
     vl=len(v)
-    v=v.strip()
+    v=v.lstrip()
     consumed_chars+=vl-len(v)
+    qn=find_quote(v)
     for i in td:
         if v[0]==i:
             tdelim=v[0]
@@ -78,7 +88,7 @@ def find_delimiters(v, td='{,:', bd=':,}'):
     nl=[]
     for i in bd:
         n=v.find(i)
-        if n>0: nl.append(n)
+        if n>qn: nl.append(n)
     if nl:
         n=min(nl)
         bdelim=v[n]
@@ -258,6 +268,7 @@ class ValueUnit(list):
             self.consumed_chars+=n
             # get N in [N]
             vv,repeatn,n=num_in_bracket(vv)
+            prefix_N=True if n>0 else False
             self.consumed_chars+=n
             # get inside of {...}
             vvp,n=find_brapair(vv, '{')
@@ -277,7 +288,10 @@ class ValueUnit(list):
                     res.append(ValueAtom(vvp))
 
         self.nofe1=max(nofe, len(res))
-        if len(res)>1 and repeatn>1: self.array=True
+        if len(res)>1 and repeatn>1:
+            self.array=True
+        elif len(res)>=1 and repeatn>=1 and prefix_N:
+            self.array=True
         super().__init__(res)
         if not struct and not self.array and len(res)>1:
             self.array=self.children_same_type()
@@ -450,7 +464,9 @@ class ScanConfigFile(object):
 
     v['values'] has a ValueUnit instance
     '''
-    def __init__(self, fname="defaults.cfg", tfname=None):
+    def __init__(self, fname="defaults.cfg", tfname=None, pf=''):
+        self.pf=pf
+        self.in_header_addition=False
         inf=self.file_preproc(fname)
         if tfname:
             self.toutf=open(tfname, "w")
@@ -459,7 +475,7 @@ class ScanConfigFile(object):
         recomment=re.compile(r"^([^#]*)#(.*)")
         recomps=[]
         recomps.append(re.compile(r"^\s*(\S*):fname\s+(\S+)"))
-        recomps.append(re.compile(r"^(.*)\s+(I[RW]*)\s*$"))
+        recomps.append(re.compile(r"^(.*)\s+([IRWP]+)\s*$"))
         recomps.append(re.compile(r"^\s*(\S*)-(\S[^[ ]*)\[(\d*)\]\.?(\S*)\s+(\S+)"))
         recomps.append(re.compile(r"^\s*(\S*)-([^.\s]*)\.?(\S*)\s+(\S+)"))
         recomps.append(re.compile(r"^\s*(\S[^[ ]*)\[(\d*)\]\s+(\S+)"))
@@ -467,6 +483,7 @@ class ScanConfigFile(object):
 
         self.struct_defs=StructDefinitions()
         self.string_types_set=set()
+        self.thirdelement_type_set=set()
 
         slen=0
         #(value_name, index, value, ipcon)
@@ -474,9 +491,21 @@ class ScanConfigFile(object):
         #(struct_name, None/filed_name, value_name, index, value, ipcon)
         self.struct_items=[]
         self.struct_fnames={}
+        self.header_addition=[]
+        cline=""
         while True:
-            line=inf.readline()
-            if line=="": break
+            nline=inf.readline()
+            if nline=="": break
+            nline=nline.rstrip()
+            if self.proc_header_addition(nline): continue
+            nline=nline.lstrip()
+            if nline and len(nline)>0 and nline[-1]=='\\':
+                cline+=nline[:-1]
+                continue
+            else:
+                cline+=nline
+            line=cline
+            cline=""
             rc=recomment.match(line)
             if rc:
                 line=rc.group(1)
@@ -485,6 +514,7 @@ class ScanConfigFile(object):
                 comment=''
 
             ipcon=0
+            persistent=0
             line,sdq=SpaceInQuote.replace_spaces(line)
             for i, recomp in enumerate(recomps):
                 r=recomp.match(line)
@@ -495,34 +525,38 @@ class ScanConfigFile(object):
                     self.struct_fnames[r.group(1)]=r.group(2).split(',')
                     break
                 elif i==1:
-                    # IPC on
-                    if r.group(2)=="IR": ipcon=1
-                    elif r.group(2)=="IW": ipcon=2
-                    else: ipcon=3
+                    # [IRWP], ipc or persistent
+                    w=r.group(2)
+                    if "I" in w:
+                        if "R" in w: ipcon=1
+                        if "W" in w: ipcon|=2
+                        if "R" not in w and "W" not in w: ipcon=3
+                    if "P" in w:
+                        persistent=1
                     continue
                 elif i==2:
                     # struct with index
                     self.struct_items.append((r.group(1), r.group(4),
                                               r.group(2), r.group(3),
-                                              SpaceInQuote.back_to_spaces(r.group(5),sdq), ipcon))
+                                              SpaceInQuote.back_to_spaces(r.group(5),sdq), ipcon, persistent))
                     break
                 elif i==3:
                     # struct without index
                     self.struct_items.append((r.group(1), r.group(3),
                                               r.group(2), None,
-                                              SpaceInQuote.back_to_spaces(r.group(4),sdq), ipcon))
+                                              SpaceInQuote.back_to_spaces(r.group(4),sdq), ipcon, persistent))
                     break
                 elif i==4:
                     # value with index
                     self.value_items.append((r.group(1), r.group(2),
                                              SpaceInQuote.back_to_spaces(r.group(3), sdq),
-                                             ipcon))
+                                             ipcon, persistent))
                     break
                 elif i==5:
                     # value without index
                     self.value_items.append((r.group(1), None,
                                              SpaceInQuote.back_to_spaces(r.group(2), sdq),
-                                             ipcon))
+                                             ipcon, persistent))
                     break
 
             if self.toutf:
@@ -531,22 +565,49 @@ class ScanConfigFile(object):
         inf.close()
         if self.toutf: self.toutf.close()
 
+    def proc_header_addition(self, nline, noadd=False):
+        if nline=="### HEADER ADDITION ###":
+            self.in_header_addition=True
+            return True
+        if nline=="### END HEADER ADDITION ###":
+            self.in_header_addition=False
+            return True
+        if not self.in_header_addition: return False
+        if noadd: return True
+        self.header_addition.append(nline)
+        return True
+
     def file_preproc(self, fname):
         inf=open(fname)
         replace_words=[]
+        self.persistent_fname=None
         while True:
             line=inf.readline()
             if line=='': break
+            line=line.rstrip()
+            if self.proc_header_addition(line, noadd=True): continue
             items=line.split()
+            if len(items)==0: continue
+            if items[0]=="UNIPAC_PERSISTENT":
+                self.persistent_fname="(char*)%sconf_get_item(UNIPAC_PERSISTENT)" % self.pf
+                continue
             if len(items)<3: continue
             if items[0]!="#define": continue
             replace_words.append((items[1],items[2]))
         inf.seek(0)
-        rdata=inf.read()
-        for rw in replace_words:
-            rdata=rdata.replace(rw[0], rw[1])
         outf=StringIO()
-        outf.write(rdata)
+        in_addition=False
+        while True:
+            line=inf.readline()
+            if line=="": break
+            if line.find("### HEADER ADDITION ###")==0:
+                in_addition=True
+            if line.find("### END HEADER ADDITION ###")==0:
+                in_addition=False
+            if not in_addition:
+                for rw in replace_words:
+                    line=line.replace(rw[0], rw[1])
+            outf.write(line)
         outf.seek(0)
         inf.close()
         return outf
@@ -634,10 +695,15 @@ class ScanConfigFile(object):
             fnames= self.struct_fnames[vi[0]] if vi[0] in self.struct_fnames else None
             self.proc_oneitem(vi[2:], struct=vi[0], fi=vi[1], fnames=fnames)
 
+    def get_findex_fname(self, fi, fnames):
+        for i,x in enumerate(fnames):
+            if fi==x: return i
+        return None
+
     def proc_oneitem(self, vi, struct=None, fi=None, fnames=None):
         vname=vi[0]
         if vname not in self.ditems:
-            self.ditems[vname]={'struct':struct, 'ipcon':vi[3], 'values':[], 'pi':-1}
+            self.ditems[vname]={'struct':struct, 'ipcon':vi[3], 'persistent':vi[4], 'values':[], 'pi':-1}
 
         if struct:
             vs,n=find_brapair(vi[2], '{')
@@ -674,8 +740,10 @@ class ScanConfigFile(object):
                 try:
                     findex=int(fi[1:])
                 except ValueError:
-                    logger.error("the field name is wrong")
-                if findex==None: return -1
+                    if fnames: findex=self.get_findex_fname(fi, fnames)
+                if findex==None:
+                    logger.error("the field name:'%s' is wrong" % fi)
+                    return -1
                 self.vname_update(vname, v, index=nei, findex=findex)
 
             if nei!=None: self.ditems[vname]['pi']=nei
@@ -698,6 +766,28 @@ class ScanConfigFile(object):
                 if not st: continue
                 self.register_string_types(st)
 
+    def get_vtype_ens(self, v):
+        res={'vtype':None, 'ens0':None, 'ens1':None}
+        if len(v['values'])>=1 and v['values'].array:
+            res['ens0']=len(v['values'])
+        if v['struct']:
+            res['vtype']=v['struct']+"_t"
+        else:
+            res['vtype']=v['values'].get_first_smax_vtype()
+            if not res['ens0']: v['values'].str_nobraces=True
+            if v['values'].max_len_in_children()>1:
+                res['ens1']=v['values'].max_len_in_children()
+        return res
+
+    def set_thirdelement_type_set(self):
+        for vname,v in self.ditems.items():
+            vtens=self.get_vtype_ens(v)
+            if vtens['ens0'] and vtens['ens1'] and \
+               isinstance(v['values'][0][0], ValueUnit) and len(v['values'][0][0])>1:
+                etype="%s_%dt" % (v['values'][0][0][0][0].upper(), len(v['values'][0][0]))
+                self.thirdelement_type_set|={ \
+                    (v['values'][0][0][0][0], etype, len(v['values'][0][0]))}
+
 class ConfigOutput(object):
     def __init__(self, scanconfig, pf):
         super().__init__()
@@ -705,7 +795,7 @@ class ConfigOutput(object):
         self.outf=StringIO()
         self.pf=pf
 
-    def write_from_temp(self, fname, tempfname=None):
+    def write_from_temp(self, fname, tempfname=None, bt=None):
         soutf=open(fname, "w")
         soutf.write("/* Don't edit this file.  This is an automatically generated file. */\n")
         if tempfname:
@@ -718,7 +808,17 @@ class ConfigOutput(object):
         self.outf.seek(0)
         generated_text=self.outf.read()
         temptext=temptext.replace("/*_CONF_GENERATED_*/", generated_text)
-        soutf.write(temptext)
+        ep=temptext.rfind("#endif")
+        if ep>0:
+            soutf.write(temptext[:ep])
+            if bt:
+                soutf.write(bt)
+                soutf.write("\n")
+            soutf.write(temptext[ep:])
+        else:
+            soutf.write(temptext)
+            if bt:
+                soutf.write(bt)
         soutf.close()
 
     def close(self):
@@ -735,6 +835,15 @@ class ConfigHeaderOutput(ConfigOutput):
             self.outf.write("#ifndef UP_%s%d_DEFINED\n" % (ValueAtom.STRTPREF.upper(), i))
             self.outf.write("#define UP_%s%d_DEFINED\n" % (ValueAtom.STRTPREF.upper(), i))
             self.outf.write("typedef char %s%d[%d];\n" % (ValueAtom.STRTPREF, i, i+1))
+            self.outf.write("#endif\n")
+        self.outf.write("\n")
+
+    def print_thirdelement_types(self):
+        self.scanconfig.set_thirdelement_type_set()
+        for i in self.scanconfig.thirdelement_type_set:
+            self.outf.write("#ifndef %s_DEFINED\n" % i[1])
+            self.outf.write("#define %s_DEFINED\n" % i[1])
+            self.outf.write("typedef %s %s[%d];\n" % (i[0],i[1],i[2]))
             self.outf.write("#endif\n")
         self.outf.write("\n")
 
@@ -787,12 +896,15 @@ class ConfigHeaderOutput(ConfigOutput):
             self.outf.write("\t%s,\n" % key)
         self.outf.write("\t%sCONF_ENUM_LAST_STRUCT\n" % self.pf)
         self.outf.write("} %s_config_struct_t;\n" % self.pf)
-
         self.outf.write("\n")
+
+    def print_header_addition(self):
+        self.scanconfig.header_addition.append('')
+        return "\n".join(self.scanconfig.header_addition)
 
 class ConfigCodeOutput(ConfigOutput):
     def print_config_item_strings(self):
-        self.outf.write("static char *config_item_strings[]={\n")
+        self.outf.write("static const char *config_item_strings[]={\n")
         for key in self.scanconfig.ditems.keys():
             self.outf.write("\t\"%s\",\n" % key)
         self.outf.write("};\n")
@@ -812,6 +924,102 @@ class ConfigCodeOutput(ConfigOutput):
         self.outf.write("};\n")
         self.outf.write("\n")
 
+    def print_config_item_persistent(self):
+        self.outf.write("static const int8_t config_item_persistent[]={\n")
+        self.outf.write("\t")
+        for i,v in enumerate(self.scanconfig.ditems.keys()):
+            if self.scanconfig.ditems[v]['persistent']:
+                self.outf.write("1, ")
+            else:
+                self.outf.write("0, ")
+            if i%16==15:
+                self.outf.write("\n\t")
+        self.outf.write("};\n")
+        self.outf.write("\n")
+
+    def get_persistent_rw_items(self, fobj='outf'):
+        frwlist=[]
+        vs=list(self.scanconfig.ditems.keys())
+        vs.sort()
+        if fobj=='outf':
+            fcmd='fwrite'
+        else:
+            fcmd='fread'
+        for v in vs:
+            vi=self.scanconfig.ditems[v]
+            if not vi['persistent']: continue
+            vtens=self.scanconfig.get_vtype_ens(vi)
+            en=0
+            if vtens['ens0']: en=vtens['ens0']
+            if vtens['ens1']: en=max(1, en)*vtens['ens1']
+            if en:
+                frwlist.append('\tif(%s(v_%s, sizeof(%s), %d, %s)!=%d) res=1;\n' % \
+                               (fcmd, v, vtens['vtype'], en, fobj, en))
+            else:
+                frwlist.append('\tif(%s(&v_%s, sizeof(%s), 1, %s)!=1) res=1;\n' % \
+                               (fcmd, v, vtens['vtype'], fobj))
+        frwlist.append('\tif(res){\n')
+        frwlist.append('\t\tUB_LOG(UBL_ERROR, "%s: wrong return value\\n", __func__);\n')
+        frwlist.append('\t}\n')
+        return frwlist
+
+    def print_persistent_save_restore(self, ctext, fobj):
+        self.outf.write("{\n")
+        if not self.scanconfig.persistent_fname:
+            self.outf.write("}\n")
+            self.outf.write("\n")
+            return
+        self.outf.write("\tconst char *fname=%s;\n" % self.scanconfig.persistent_fname)
+        self.outf.write(ctext)
+        frwlist=self.get_persistent_rw_items(fobj)
+        self.outf.write("".join(frwlist))
+        self.outf.write("\tfclose(%s);\n" % fobj)
+        self.outf.write("}\n")
+        self.outf.write("\n")
+
+    def print_persistent_save(self):
+        self.outf.write("static void persistent_save(bool force)\n")
+        ctext='''
+	FILE *outf;
+        int res=0;
+	if(!fname || fname[0]==0) return;
+	if(!force && !persistent_dirty) return;
+	if(!force &&
+	   ub_mt_gettime64()-persistent_dirty_lastts<PERSISTENT_SAVE_INTERVAL)
+		return;
+	persistent_dirty=false;
+	outf=fopen(fname, "w+");
+	if(!outf){
+		UB_LOG(UBL_ERROR, "%s:can't open fname=%s\\n", __func__, fname);
+		return;
+	}
+'''
+        self.print_persistent_save_restore(ctext, 'outf')
+        self.outf.write("void %spersistent_save(void)\n" % self.pf)
+        self.outf.write("{\n")
+        self.outf.write("\tpersistent_save(true);\n")
+        self.outf.write("}\n")
+        self.outf.write("\n")
+
+    def print_persistent_restore(self):
+        self.outf.write("static void persistent_restore(void)\n")
+        ctext='''
+	FILE *inf;
+        int res=0;
+	if(!fname || fname[0]==0) return;
+	inf=fopen(fname, "r");
+	if(!inf){
+		UB_LOG(UBL_ERROR, "%s:can't open fname=%s\\n", __func__, fname);
+		return;
+	}
+'''
+        self.print_persistent_save_restore(ctext, 'inf')
+        self.outf.write("void %spersistent_restore(void)\n" % self.pf)
+        self.outf.write("{\n")
+        self.outf.write("\tpersistent_restore();\n")
+        self.outf.write("}\n")
+        self.outf.write("\n")
+
     def print_config_struct_strings(self):
         self.outf.write("static char *config_struct_strings[]={\n")
         for key in self.scanconfig.struct_defs.keys():
@@ -819,22 +1027,44 @@ class ConfigCodeOutput(ConfigOutput):
         self.outf.write("};\n")
         self.outf.write("\n")
 
+        self.outf.write("typedef struct struct_field_names {\n")
+        self.outf.write("\tint sitem;\n")
+        self.outf.write("\tchar *nmstr;\n")
+        self.outf.write("} struct_field_names_t;\n")
+        self.outf.write("\n")
+
+        self.outf.write("static struct_field_names_t config_struct_fnames[]={\n")
+        for key in self.scanconfig.struct_defs.keys():
+            if key not in self.scanconfig.struct_fnames: continue
+            fsn=",".join(self.scanconfig.struct_fnames[key])
+            self.outf.write("\t{%s, \"%s\"},\n" % (key, fsn))
+        self.outf.write("\t{-1, NULL},\n")
+        self.outf.write("};\n");
+        self.outf.write("\n")
+
+        self.outf.write("static struct_field_names_t struct_fnames_variables[]={\n")
+        for vname,v in self.scanconfig.ditems.items():
+            if not v['struct']: continue
+            if v['struct'] not in self.scanconfig.struct_fnames: continue
+            self.outf.write("\t{%s, \"%s\"},\n" % (v['struct'], vname))
+        self.outf.write("\t{-1, NULL},\n")
+        self.outf.write("};\n");
+        self.outf.write("\n")
+
     def print_config_values(self):
         for vname,v in self.scanconfig.ditems.items():
-            if len(v['values'])>1 and v['values'].array:
-                ens='[%d]' % len(v['values'])
+            vtens=self.scanconfig.get_vtype_ens(v)
+            ens=""
+            if vtens['ens0']: ens+="[%d]" % vtens['ens0']
+            if vtens['ens1']: ens+="[%d]" % vtens['ens1']
+            if vtens['ens0'] and vtens['ens1'] and \
+               isinstance(v['values'][0][0], ValueUnit) and len(v['values'][0][0])>1:
+                etype="%s_%dt" % (v['values'][0][0][0][0].upper(), len(v['values'][0][0]))
+                self.outf.write("static %s v_%s%s=%s;\n" % \
+                                (etype, vname, ens, str(v['values'])))
             else:
-                ens=""
-            if v['struct']:
-                vtype=v['struct']+"_t"
-            else:
-                vtype=v['values'].get_first_smax_vtype()
-                if not ens: v['values'].str_nobraces=True
-                if v['values'].max_len_in_children()>1:
-                    ens=ens+'[%d]' % v['values'].max_len_in_children()
-            vstr=str(v['values'])
-            self.outf.write("static %s v_%s%s=%s;\n" % \
-                            (vtype, vname, ens, vstr))
+                self.outf.write("static %s v_%s%s=%s;\n" % \
+                                (vtens['vtype'], vname, ens, str(v['values'])))
 
     def print_pointers_list(self):
         self.outf.write("static void *config_value_pointers[]={\n")
@@ -942,10 +1172,12 @@ class ConfigCodeOutput(ConfigOutput):
 			vp=v+i*vs*vnum;
 			if(check_first_char(svalues, svalsize, '{')) ffb++;
 			for(j=0;j<vnum && usize<*esize;j++){
+				rn=get_bracket_num(svalues, svalsize, false);
+				if(rn<0) rn=1;
 				_SETRV_;
 
-				vp = ((char*)vp) + vs;
-				usize+=vs;
+				vp = ((char*)vp) + vs*rn;
+				usize+=vs*rn;
 				*svalsize-=vn-*svalues;
 				*svalues=vn;
 				if(!check_first_char(svalues, svalsize, '_BCHAR_')) break;
@@ -971,6 +1203,7 @@ static void *get_value(int vs, int elen, int vnum, int vtype,
 	int ffb=0;
         int usize=0;
 	int i,j;
+	int rn,k;
 	int res=0;
 	if(*svalsize<=0) return NULL;
 	v=malloc(vs*vnum*elen);
@@ -986,20 +1219,20 @@ static void *get_value(int vs, int elen, int vnum, int vtype,
             bc=","
             if k=="int8_t" or k=="int16_t" or k=="int32_t" or k=="int64_t" or \
                k=="uint32_t" or k=="uint64_t":
-                us="rv=strtol(*svalues, &vn, 0);if(*svalues==vn){break;};memcpy(vp, &rv, vs)"
+                us="rv=strtol(*svalues, &vn, 0);if(*svalues==vn){break;};for(k=0;k<rn;k++){memcpy(vp+vs*k, &rv, vs);}"
             elif k=="float":
-                us="rv=strtof(*svalues, &vn);if(*svalues==vn){break;};memcpy(vp, &rv, vs)"
+                us="rv=strtof(*svalues, &vn);if(*svalues==vn){break;};for(k=0;k<rn;k++){memcpy(vp+vs*k, &rv, vs);}"
             elif k=="double":
-                us="rv=strtod(*svalues, &vn);if(*svalues==vn){break;};memcpy(vp, &rv, vs)"
+                us="rv=strtod(*svalues, &vn);if(*svalues==vn){break;};for(k=0;k<rn;k++){memcpy(vp+vs*k, &rv, vs);}"
             elif k=="bool":
                 us="rv=strstr(*svalues, \"true\")==*svalues;" \
                 "if(!rv && !strstr(*svalues, \"false\")){break;}" \
-                "vn=*svalues+(rv?4:5);memcpy(vp, &rv, vs)"
+                "vn=*svalues+(rv?4:5);for(k=0;k<rn;k++){memcpy(vp+vs*k, &rv, vs);}"
             elif k=="uint8_t" or k=="uint16_t":
-                us="rv=strtol(*svalues, &vn, 16);if(*svalues==vn){break;};memcpy(vp, &rv, vs)"
+                us="rv=strtol(*svalues, &vn, 16);if(*svalues==vn){break;};for(k=0;k<rn;k++){memcpy(vp+vs*k, &rv, vs);}"
                 bc=':'
             elif k=="char":
-                us="rv=(*svalues)[1];vn=*svalues+3;memcpy(vp, &rv, vs)"
+                us="rv=(*svalues)[1];vn=*svalues+3;for(k=0;k<rn;k++){memcpy(vp+vs*k, &rv, vs);}"
             else:
                 continue
 
@@ -1022,8 +1255,22 @@ static void *get_value(int vs, int elen, int vnum, int vtype,
         ctext=self.get_value_typecode()
         ctext=ctext.replace("	case VT__VTYPEUPPER_:\n", "")
         ctext=ctext.replace("_VTYPE_", "char*")
-        us="rv=strchr(*svalues+1,'\"');if(!rv||rv-(*svalues+1)>=vs) break;" \
-                "memcpy(vp,*svalues+1,rv-(*svalues+1));vn=rv+1"
+        us='''bool esc=false;
+				int n=0;
+				if(*svalues[0]!='"') break;
+				if(!strchr(*svalues+1,'"')) break;
+				for(rv=*svalues+1;rv<=*svalues+1+vs;rv++){
+					if(!esc && *rv=='"') break;
+					if(*rv=='\\\\'){
+						esc=true;
+						continue;
+					}
+					esc=false;
+					((char*)vp)[n++]=*rv;
+				}
+				if(*rv!='"') break;
+				((char*)vp)[n]=0;
+				vn=rv+1'''
         ctext=ctext.replace("_SETRV_", us)
         ctext=ctext.replace("_BCHAR_", ",")
         self.outf.write(ctext)
@@ -1047,6 +1294,8 @@ class ConfigTestcodeOutput(ConfigOutput):
         self.outf.write('#include <string.h>\n')
         self.outf.write('#include <stdio.h>\n')
         self.outf.write('#include "%s"\n' % hfname[hfname.rfind('/')+1:])
+        self.outf.write('#include <xl4unibase/unibase.h>\n')
+        self.outf.write('#include <xl4unibase/unibase_binding.h>\n')
 
     def print_numtest_function(self, vt):
         self.outf.write("static int %stest(void)\n" % (vt))
@@ -1167,12 +1416,16 @@ class ConfigTestcodeOutput(ConfigOutput):
         self.outf.write("\n")
         self.outf.write("int main(int argc, char* argv[])\n")
         self.outf.write("{\n")
+        self.outf.write("\tunibase_init_para_t init_para;\n")
+        self.outf.write("\tubb_default_initpara(&init_para);\n")
+        self.outf.write('\tunibase_init(&init_para);\n')
         self.outf.write("\tif(int32_ttest()) return -1;\n")
         self.outf.write("\tif(int64_ttest()) return -1;\n")
         self.outf.write("\tif(floattest()) return -1;\n")
         self.outf.write("\tif(chartest()) return -1;\n")
         self.outf.write("\tif(int32_tarraytest()) return -1;\n")
         self.outf.write("\tif(structtest()) return -1;\n")
+        self.outf.write("\tunibase_close();\n")
         self.outf.write("\treturn 0;\n")
         self.outf.write("}\n")
 
@@ -1358,7 +1611,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     pf=options['prefix']
-    dc=ScanConfigFile(fname=options['input'], tfname=options['tmpcfg'])
+    dc=ScanConfigFile(fname=options['input'], tfname=options['tmpcfg'], pf=options['prefix'])
     dc.proc_allitems()
     dc.scan_string_types()
     hfile="%s_configs.h" % pf
@@ -1373,18 +1626,23 @@ if __name__ == "__main__":
         hc=ConfigHeaderOutput(dc, pf, packed=options['packed'])
         hc.print_enum()
         hc.print_string_types()
+        hc.print_thirdelement_types()
         hc.print_struct_enum()
         hc.print_struct()
-        hc.write_from_temp(hfile, "%s/%s" % (tempdir, "temp_configs.h"))
+        bt=hc.print_header_addition()
+        hc.write_from_temp(hfile, "%s/%s" % (tempdir, "temp_configs.h"), bt=bt)
         hc.close()
 
     if options['cfile']:
         cc=ConfigCodeOutput(dc, pf)
         cc.print_config_item_strings()
         cc.print_config_item_ipcon()
+        cc.print_config_item_persistent()
         cc.print_config_struct_strings()
         cc.print_config_values()
         cc.print_pointers_list()
+        cc.print_persistent_save()
+        cc.print_persistent_restore()
         cc.print_struct_field_vtype()
         cc.print_struct_field_update()
         cc.print_get_value()

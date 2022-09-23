@@ -28,19 +28,31 @@
 char *_CONFPREFIX_item_values_to_string(int item, int index, int findex,
 					void *values, int valsize, bool dnonidxed);
 
-#define _CONFPREFIX_IPCDATA_BMAGIC 0x00112233
-#define _CONFPREFIX_IPCDATA_TMAGIC 0x54545454 //"TTTT"
-typedef enum {
-	_CONFPREFIX_IPCCMD_READ = 0,
-	_CONFPREFIX_IPCCMD_WRITE,
-	_CONFPREFIX_IPCCMD_NOTICE,
-	_CONFPREFIX_IPCCMD_QEVLIST,
-	_CONFPREFIX_IPCCMD_DISCONNECT,
-} _CONFPREFIX_ipccmd_t;
+#ifndef __XL4UNIPACK_IPCDATA_
+#define __XL4UNIPACK_IPCDATA_
 
-// this is a format in the binary mode
-// in text mode, "magic R/W/N/Q vname data_in_text"
-typedef struct _CONFPREFIX_ipcdata {
+#define XL4UNIPAC_IPCDATA_BMAGIC 0x00112233
+#define XL4UNIPAC_IPCDATA_TMAGIC 0x54545454 //"TTTT"
+typedef enum {
+	XL4UNIPAC_IPCCMD_READ = 0,
+	XL4UNIPAC_IPCCMD_WRITE,
+	XL4UNIPAC_IPCCMD_NOTICE,
+	XL4UNIPAC_IPCCMD_QEVLIST,
+	XL4UNIPAC_IPCCMD_DISCONNECT,
+} xl4unipac_ipccmd_t;
+
+/* this is a format in the binary mode
+   in text mode, "magic R/W/N/Q vname data_in_text"
+
+   BTMODE, item=-1,
+   This mode uses the binary mode, but the variable is passed not by
+   item but by variable name string.
+   the variable string size in one byte comes data[0]
+   data[1:] is the variable string without null terminator.
+   data[strlen(VARIABLE)+1:] is the binary data.
+   'size' field includes this size, i.e. the binary data size + strlen(VARIABLE)+1
+*/
+typedef struct xl4unipac_ipcdata {
 	uint32_t magic;
 	int32_t cmd;
 	int32_t item;
@@ -48,7 +60,24 @@ typedef struct _CONFPREFIX_ipcdata {
 	int32_t findex;
 	int32_t size;
 	uint8_t data[4];
-}__attribute__((packed)) _CONFPREFIX_ipcdata_t;
+}__attribute__((packed)) xl4unipac_ipcdata_t;
+#endif
+
+/* TO BE UPPER COMPATIBLE */
+/* The following 'XL4UNIPAC_*' -> '_CONFPREFIX_' definitions are to be compatible
+   the old version. new programs should use  XL4UNIPAC_* */
+#define _CONFPREFIX_IPCDATA_BMAGIC XL4UNIPAC_IPCDATA_BMAGIC
+#define _CONFPREFIX_IPCDATA_TMAGIC XL4UNIPAC_IPCDATA_TMAGIC
+
+#define _CONFPREFIX_IPCCMD_READ        XL4UNIPAC_IPCCMD_READ
+#define _CONFPREFIX_IPCCMD_WRITE       XL4UNIPAC_IPCCMD_WRITE
+#define _CONFPREFIX_IPCCMD_NOTICE      XL4UNIPAC_IPCCMD_NOTICE
+#define _CONFPREFIX_IPCCMD_QEVLIST     XL4UNIPAC_IPCCMD_QEVLIST
+#define _CONFPREFIX_IPCCMD_DISCONNECT  XL4UNIPAC_IPCCMD_DISCONNECT
+
+#define _CONFPREFIX_ipccmd_t xl4unipac_ipccmd_t
+#define _CONFPREFIX_ipcdata_t xl4unipac_ipcdata_t
+/* END TO BE UPPER COMPATIBLE */
 
 typedef int (* _CONFPREFIX_ipcserver_update_cb)(void *cbdata, int item, int index, int findex);
 

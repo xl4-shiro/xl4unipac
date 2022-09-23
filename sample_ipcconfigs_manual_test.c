@@ -221,6 +221,7 @@ static void *client_thread1(void *arg)
 	*thread_stop=1;
 	return NULL;
 erexit:
+	printf("#### error scmd=%s #####\n", scmd);
 	cb_ipcsocket_close(fd, ipcclnode, NULL);
 	*thread_stop=2;
 	return NULL;
@@ -257,7 +258,8 @@ static void *client_thread2(void *arg)
 	res=cb_fdread_timeout(fd, rdata, 1024, 100);
 	if(res<=0) {printf("cmd error, res=%d\n", res);goto erexit;}
 	if(*((int32_t *)ripcd->data)!=1234) goto erexit;
-	printf("%d\n-----\n", *((int32_t *)ripcd->data));
+	printf("%s,%d\n-----\n", sampleconfig_item_strings(ipcd->item),
+	       *((int32_t *)ripcd->data));
 
 	ipcd->item=VALUE_S;
 	ipcd->index=-1;
@@ -269,12 +271,12 @@ static void *client_thread2(void *arg)
 	{
 		ABC_02_t *v=(ABC_02_t *)ripcd->data;
 		for(i=0;i<5;i++){
-			if(v[i].NumX!=3) goto erexit;
+			if(i!=4 && v[i].NumX!=3) goto erexit;
 			if(v[i].FlagY!=true) goto erexit;
 			if(strcmp(v[i].StringZ,"pq")) goto erexit;
 		}
 	}
-	printf("%s\n-----\n", "VALUE_S");
+	printf("%s\n-----\n", sampleconfig_item_strings(ipcd->item));
 
 	ipcd->item=VALUE_R;
 	ipcd->index=2;
@@ -296,7 +298,7 @@ static void *client_thread2(void *arg)
 		if(v->f6!=20) goto erexit;
 		if(v->f7!=30) goto erexit;
 	}
-	printf("%s\n-----\n", "VALUE_R[2]");
+	printf("%s[2]\n-----\n", sampleconfig_item_strings(ipcd->item));
 
 	ipcd->item=VALUE_R;
 	ipcd->cmd=sampleIPCCMD_WRITE;
@@ -319,6 +321,129 @@ static void *client_thread2(void *arg)
 	*thread_stop=1;
 	return NULL;
 erexit:
+	printf("#### error vname=%s #####\n",
+	       sampleconfig_item_strings(ipcd->item));
+	cb_ipcsocket_close(fd, ipcclnode, NULL);
+	*thread_stop=2;
+	return NULL;
+}
+
+static void *client_thread3(void *arg)
+{
+	int fd;
+	int i,res;
+	char *ipcclnode="/tmp/sample_ipcconfc2";
+	int *thread_stop=(int *)arg;
+	uint8_t sdata[1024];
+	uint8_t rdata[1024];
+	sampleipcdata_t *ripcd=(sampleipcdata_t *)rdata;
+	sampleipcdata_t *ipcd=(sampleipcdata_t *)sdata;
+	char *vname;
+	int vsize;
+
+	for(i=0;i<10;i++){
+		res=cb_ipcsocket_init(&fd, ipcclnode, NULL, "/tmp/sample_ipcconf");
+		if(!res) break;
+		usleep(10000);
+	}
+	if(res) return NULL;
+
+	printf("----- BT mode client -----\n");
+	memset(sdata, 0, sizeof(sdata));
+	ipcd->magic=sampleIPCDATA_BMAGIC;
+	ipcd->cmd=sampleIPCCMD_READ;
+
+	vname="VALUE_A_01";
+	vsize=strlen(vname);
+	ipcd->item=-1;
+	ipcd->index=-1;
+	ipcd->findex=-1;
+	ipcd->data[0]=vsize;
+	ipcd->size=vsize+1;
+	memcpy(ipcd->data+1, vname, vsize);
+	res=write(fd, sdata, sizeof(sampleipcdata_t)+vsize+1-4);
+	res=cb_fdread_timeout(fd, rdata, 1024, 100);
+	if(res<=0) {printf("cmd error, res=%d\n", res);goto erexit;}
+	if(*((int32_t *)(ripcd->data+vsize+1))!=1234) goto erexit;
+	printf("%d\n-----\n", *((int32_t *)(ripcd->data+vsize+1)));
+
+	vname="VALUE_S";
+	vsize=strlen(vname);
+	ipcd->item=-1;
+	ipcd->index=-1;
+	ipcd->findex=-1;
+	ipcd->data[0]=vsize;
+	ipcd->size=vsize+1;
+	memcpy(ipcd->data+1, vname, vsize);
+	res=write(fd, sdata, sizeof(sampleipcdata_t)+vsize+1-4);
+	res=cb_fdread_timeout(fd, rdata, 1024, 100);
+	if(res<=0) {printf("cmd error, res=%d\n", res);goto erexit;}
+	if(ripcd->size!=sizeof(ABC_02_t)*5+vsize+1) goto erexit;
+	{
+		ABC_02_t *v=(ABC_02_t *)(ripcd->data+vsize+1);
+		for(i=0;i<5;i++){
+			if(i!=4 && v[i].NumX!=3) goto erexit;
+			if(v[i].FlagY!=true) goto erexit;
+			if(strcmp(v[i].StringZ,"pq")) goto erexit;
+		}
+	}
+	printf("%s\n-----\n", "VALUE_S");
+
+	vname="VALUE_R";
+	vsize=strlen(vname);
+	ipcd->item=-1;
+	ipcd->index=2;
+	ipcd->findex=-1;
+	ipcd->data[0]=vsize;
+	ipcd->size=vsize+1;
+	memcpy(ipcd->data+1, vname, vsize);
+	res=write(fd, sdata, sizeof(sampleipcdata_t)+vsize+1-4);
+	res=cb_fdread_timeout(fd, rdata, 1024, 100);
+	if(res<=0) {printf("cmd error, res=%d\n", res);goto erexit;}
+	if(ripcd->size!=sizeof(ABC_01_t)+vsize+1) goto erexit;
+	{
+		ABC_01_t *v=(ABC_01_t *)(ripcd->data+vsize+1);
+		if(v->f0!=0) goto erexit;
+		// replaced in client_thread2
+		if(strcmp(v->f1,"XYZ")) goto erexit;
+		if(v->f2!=2.0) goto erexit;
+		if(v->f3!=true) goto erexit;
+		if(v->f4[0]!=1) goto erexit;
+		if(v->f4[1]!=2) goto erexit;
+		if(v->f4[2]!=3) goto erexit;
+		if(v->f5!=10) goto erexit;
+		if(v->f6!=20) goto erexit;
+		if(v->f7!=30) goto erexit;
+	}
+	printf("%s\n-----\n", "VALUE_R[2]");
+
+	vname="VALUE_R";
+	vsize=strlen(vname);
+	ipcd->item=-1;
+	ipcd->cmd=sampleIPCCMD_WRITE;
+	ipcd->index=2;
+	ipcd->findex=1;
+	ipcd->size=vsize+1+4;
+	memcpy(ipcd->data+vsize+1, "PQR", 4);
+	ipcd->data[0]=vsize;
+	memcpy(ipcd->data+1, vname, vsize);
+	res=write(fd, sdata, sizeof(sampleipcdata_t)+vsize+1);
+	ipcd->cmd=sampleIPCCMD_READ;
+	ipcd->size=vsize+1;
+	res=write(fd, sdata, sizeof(sampleipcdata_t)+vsize+1-4);
+	res=cb_fdread_timeout(fd, rdata, 1024, 100);
+	if(res<=0) {printf("cmd error, res=%d\n", res);goto erexit;}
+	if(strcmp((char*)(ripcd->data+vsize+1),"PQR")) goto erexit;
+	printf("%s\n-----\n", "VALUE_R[2].f1 update");
+
+	ipcd->cmd=sampleIPCCMD_DISCONNECT;
+	res=write(fd, sdata, sizeof(sampleipcdata_t));
+
+	cb_ipcsocket_close(fd, ipcclnode, NULL);
+	*thread_stop=1;
+	return NULL;
+erexit:
+	printf("#### error vname=%s #####\n", vname);
 	cb_ipcsocket_close(fd, ipcclnode, NULL);
 	*thread_stop=2;
 	return NULL;
@@ -328,7 +453,7 @@ int ipc_update_cb(void *cbdata, int item, int index, int findex)
 {
 	char istr[6]={0,};
 	char fstr[6]={0,};
-	char *vname;
+	const char *vname;
 	vname=sampleconfig_item_strings(item);
 	if(!vname){
 		UB_LOG(UBL_ERROR, "%s:wrong item=%d\n", __func__, item);
@@ -351,6 +476,8 @@ int ipc_client(int mode)
 		CB_THREAD_CREATE(&clthread, NULL, client_thread1, &thread_stop);
 	}else if(mode==1){
 		CB_THREAD_CREATE(&clthread, NULL, client_thread2, &thread_stop);
+	}else if(mode==3){
+		CB_THREAD_CREATE(&clthread, NULL, client_thread3, &thread_stop);
 	}else{
 		int32_t v=1111;
 		upstring9 v2;
@@ -392,6 +519,7 @@ int main(int argc, char *argv[])
 		if((res=values_print())) break;
 		if((res=ipc_client(0))) break;
 		if((res=ipc_client(1))) break;
+		if((res=ipc_client(3))) break;
 		break;
 	}
 	ubb_memory_out_close();

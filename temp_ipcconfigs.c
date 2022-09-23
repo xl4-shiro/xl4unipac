@@ -26,6 +26,13 @@
 #include "_CONFPREFIX__configs.h"
 #include "_CONFPREFIX__ipcconfigs.h"
 
+#define UPCB_IPCCIENT_BVART (CB_IPCCLIENT_LAST+0)
+
+typedef struct tbmode_vstr {
+	uint8_t vsize;
+	char vstr[1]; // the size is variable by vsize
+}tbmode_vstr_t;
+
 static int realloc_vstr(char **vstr, int *vstrsize)
 {
 	char *np;
@@ -239,12 +246,13 @@ static void *ipc_receiver_proc(void *ptr)
 	return NULL;
 }
 
-static uint8_t *ipc_get_variable_data_b(int item, int index, int findex, int *size,
-					struct sockaddr *addr, char read_notice)
+static uint8_t *ipc_get_variable_data_bb(int item, int index, int findex, int *size,
+					 struct sockaddr *addr, char read_notice,
+					 int extsize, void **vdata)
 {
 	int esize, tsize;
 	void *values;
-	_CONFPREFIX_ipcdata_t *ipd=NULL;
+	xl4unipac_ipcdata_t *ipd=NULL;
 	int foffset=0;
 	values=_CONFPREFIX_conf_get_item(((_CONFPREFIX__config_item_t)item));
 	if(!values) return NULL;
@@ -253,11 +261,11 @@ static uint8_t *ipc_get_variable_data_b(int item, int index, int findex, int *si
 	tsize=esize;
 	if(index==-1) tsize*=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item));
 
-	ipd=ub_malloc_or_die(__func__, sizeof(_CONFPREFIX_ipcdata_t)+tsize-4);
+	ipd=ub_malloc_or_die(__func__, sizeof(xl4unipac_ipcdata_t)+tsize-4+extsize);
 	if(read_notice=='R')
-		ipd->cmd=_CONFPREFIX_IPCCMD_READ;
+		ipd->cmd=XL4UNIPAC_IPCCMD_READ;
 	else
-		ipd->cmd=_CONFPREFIX_IPCCMD_NOTICE;
+		ipd->cmd=XL4UNIPAC_IPCCMD_NOTICE;
 
 	if(index>0){
 		values = ((char*)values)+(index*esize);
@@ -272,18 +280,54 @@ static uint8_t *ipc_get_variable_data_b(int item, int index, int findex, int *si
 	}else{
 		ipd->size=tsize;
 	}
-	UB_LOG(UBL_DEBUGV, "%s:index=%d, findex=%d, size=%d\n",
-	       __func__, index, findex, ipd->size);
-	memcpy(ipd->data, values+foffset, ipd->size);
 	ipd->item=item;
 	ipd->index=index;
 	ipd->findex=findex;
 	ipd->magic=_CONFPREFIX_IPCDATA_BMAGIC;
-	*size=sizeof(_CONFPREFIX_ipcdata_t)+ipd->size-4;
+	*size=sizeof(xl4unipac_ipcdata_t)+ipd->size-4;
+	*vdata=values+foffset;
 	return (uint8_t *)ipd;
 erexit:
 	if(ipd) free(ipd);
 	return NULL;
+}
+
+static uint8_t *ipc_get_variable_data_b(int item, int index, int findex, int *size,
+					struct sockaddr *addr, char read_notice)
+{
+	xl4unipac_ipcdata_t *ipd;
+	void *vdata;
+	ipd=(xl4unipac_ipcdata_t *)ipc_get_variable_data_bb(
+		item, index, findex, size, addr, read_notice, 0, &vdata);
+	if(!ipd) return NULL;
+	UB_LOG(UBL_DEBUGV, "%s:index=%d, findex=%d, size=%d\n",
+	       __func__, index, findex, ipd->size);
+	memcpy(ipd->data, vdata, ipd->size);
+	return (uint8_t *)ipd;
+}
+
+static uint8_t *ipc_get_variable_data_bt(const char *vname, int item, int index,
+					 int findex, int *size,
+					 struct sockaddr *addr, char read_notice)
+{
+	xl4unipac_ipcdata_t *ipd;
+	void *vdata;
+	tbmode_vstr_t *tbv;
+	int vsize;
+	vsize=strlen(vname);
+	ipd=(xl4unipac_ipcdata_t *)ipc_get_variable_data_bb(
+		item, index, findex, size, addr, read_notice, vsize+1, &vdata);
+	if(!ipd) return NULL;
+	UB_LOG(UBL_DEBUGV, "%s:vname=%s, index=%d, findex=%d, size=%d\n",
+	       __func__, vname, index, findex, ipd->size);
+	tbv=(tbmode_vstr_t *)ipd->data;
+	tbv->vsize=vsize;
+	memcpy(tbv->vstr, vname, tbv->vsize);
+	memcpy(ipd->data+vsize+1, vdata, ipd->size);
+	ipd->size+=vsize+1;
+	*size+=vsize+1;
+	ipd->item=-1;
+	return (uint8_t *)ipd;
 }
 
 static uint8_t *ipc_get_variable_data(_CONFPREFIX_ipcserver_t *isvd,
@@ -295,7 +339,7 @@ static uint8_t *ipc_get_variable_data(_CONFPREFIX_ipcserver_t *isvd,
 	char *sval, *ssval;
 	char istr[6]={0,};
 	char fstr[6]={0,};
-	char *vname;
+	const char *vname;
 	int tl, tsize;
 
 	commode=cb_ipcsocket_get_commode(isvd->ipcsd, addr);
@@ -303,6 +347,9 @@ static uint8_t *ipc_get_variable_data(_CONFPREFIX_ipcserver_t *isvd,
 		return ipc_get_variable_data_b(item, index, findex, size, addr, read_notice);
 	vname=_CONFPREFIX_config_item_strings(item);
 	if(!vname) return NULL;
+	if(commode==UPCB_IPCCIENT_BVART)
+		return ipc_get_variable_data_bt(vname, item, index, findex, size, addr,
+						read_notice);
 	values=_CONFPREFIX_conf_get_item(((_CONFPREFIX__config_item_t)item));
 	if(!values) return NULL;
 	tsize=_CONFPREFIX_conf_get_item_element_size(((_CONFPREFIX__config_item_t)item));
@@ -347,7 +394,7 @@ static int ipc_sendback_to_query_evlist(_CONFPREFIX_ipcserver_t *isvd, bool text
 
 	int i, en, esize, res;
 	uint8_t sdata[1500]={0,};
-	_CONFPREFIX_ipcdata_t *ipd=(_CONFPREFIX_ipcdata_t *)sdata;
+	xl4unipac_ipcdata_t *ipd=(xl4unipac_ipcdata_t *)sdata;
 	int sp=0;
 	_CONFPREFIX_item_extend_t *reid;
 	void *edata;
@@ -360,8 +407,8 @@ static int ipc_sendback_to_query_evlist(_CONFPREFIX_ipcserver_t *isvd, bool text
 		sdata[sp++]=' ';
 	}else{
 		ipd->magic=_CONFPREFIX_IPCDATA_BMAGIC;
-		ipd->cmd=_CONFPREFIX_IPCCMD_QEVLIST;
-		sp=sizeof(_CONFPREFIX_ipcdata_t)-4;
+		ipd->cmd=XL4UNIPAC_IPCCMD_QEVLIST;
+		sp=sizeof(xl4unipac_ipcdata_t)-4;
 		ipd->size=0;
 	}
 
@@ -396,7 +443,7 @@ static int ipc_disconnect(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr *addr)
 static int ipc_receive_textmode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr *addr,
 				uint8_t *rdata, int size)
 {
-	_CONFPREFIX_ipccmd_t cmd;
+	xl4unipac_ipccmd_t cmd;
 	int index, findex, item;
 	int res;
 	uint8_t ipcon;
@@ -407,8 +454,8 @@ static int ipc_receive_textmode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr *
 	rdata[size]=0;
 	cb_ipcsocket_set_commode(isvd->ipcsd, addr, CB_IPCCLIENT_TEXT);
 	_CONFPREFIX_skip_chars((char**)&rdata, &size, ' ', '\t');
-	if(rdata[0]=='R') cmd=_CONFPREFIX_IPCCMD_READ;
-	else if(rdata[0]=='W') cmd=_CONFPREFIX_IPCCMD_WRITE;
+	if(rdata[0]=='R') cmd=XL4UNIPAC_IPCCMD_READ;
+	else if(rdata[0]=='W') cmd=XL4UNIPAC_IPCCMD_WRITE;
 	else if(rdata[0]=='Q') return ipc_sendback_to_query_evlist(isvd, true, addr);
 	else if(rdata[0]=='D') return ipc_disconnect(isvd, addr);
 	else return -1;
@@ -417,7 +464,7 @@ static int ipc_receive_textmode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr *
 	if(_CONFPREFIX_variable_from_str(&item, &index, &findex,
 					 (char**)&rdata, &size)) return -1;
 	ipcon=_CONFPREFIX_conf_get_ipcon(((_CONFPREFIX__config_item_t)item));
-	if(cmd==_CONFPREFIX_IPCCMD_WRITE){
+	if(cmd==XL4UNIPAC_IPCCMD_WRITE){
 		if(!(ipcon & UPIPC_W)){
 			UB_LOG(UBL_DEBUG, "item=%d is not writable through IPC\n", item);
 			return -1;
@@ -439,23 +486,56 @@ static int ipc_receive_textmode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr *
 	return ipc_send_variable_values(isvd, item, index, findex, addr, 'R');
 }
 
+static int conv_bvart_to_binary(xl4unipac_ipcdata_t *ipd, int size)
+{
+	int item, ms;
+	tbmode_vstr_t *tbv;
+	char vname[64];
+	tbv=(tbmode_vstr_t *)ipd->data;
+	if(tbv->vsize>63){
+		UB_LOG(UBL_ERROR, "%s:vsize=%d looks too big\n", __func__, tbv->vsize);
+		return -1;
+	}
+	memcpy(vname, tbv->vstr, tbv->vsize);
+	vname[tbv->vsize]=0;
+	item=_CONFPREFIX_conf_get_item_num(vname);
+	if(item==_CONFPREFIX_CONF_ENUM_NON_ITEM){
+		UB_LOG(UBL_ERROR, "%s:doesn't exist vname=%s\n", __func__,vname);
+		return -1;
+	}
+	ipd->item=item;
+	ms=ipd->size-(tbv->vsize+1);
+	if(ms<0 || ms>(size-((int)sizeof(xl4unipac_ipcdata_t)-4+tbv->vsize+1))){
+		UB_LOG(UBL_ERROR, "%s:invalid ipd->size=%d\n", __func__, ipd->size);
+		return -1;
+	}
+	return tbv->vsize+1;
+}
+
 static int ipc_receive_binarymode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr *addr,
 				  uint8_t *rdata, int size)
 {
-	_CONFPREFIX_ipcdata_t *ipd=(_CONFPREFIX_ipcdata_t *)rdata;
+	xl4unipac_ipcdata_t *ipd=(xl4unipac_ipcdata_t *)rdata;
 	int res=0;
 	uint8_t ipcon;
+	int shsize=0;
 	if(ipd->magic!=_CONFPREFIX_IPCDATA_BMAGIC) return -1;
-	cb_ipcsocket_set_commode(isvd->ipcsd, addr, CB_IPCCLIENT_BINARY);
+	if(ipd->item==-1){
+		cb_ipcsocket_set_commode(isvd->ipcsd, addr, UPCB_IPCCIENT_BVART);
+		shsize=conv_bvart_to_binary(ipd, size);
+		if(shsize<0) return -1;
+	}else{
+		cb_ipcsocket_set_commode(isvd->ipcsd, addr, CB_IPCCLIENT_BINARY);
+	}
 	ipcon=_CONFPREFIX_conf_get_ipcon(((_CONFPREFIX__config_item_t)ipd->item));
-	if(ipd->cmd==_CONFPREFIX_IPCCMD_READ){
+	if(ipd->cmd==XL4UNIPAC_IPCCMD_READ){
 		if(!(ipcon & UPIPC_R)) {
 			UB_LOG(UBL_DEBUG, "item=%d is not readable through IPC\n", ipd->item);
 			return -1;
 		}
 		return ipc_send_variable_values(
 			isvd, ipd->item, ipd->index, ipd->findex, addr, 'R');
-	}else if (ipd->cmd==_CONFPREFIX_IPCCMD_WRITE){
+	}else if (ipd->cmd==XL4UNIPAC_IPCCMD_WRITE){
 		if(!(ipcon & UPIPC_W)) {
 			UB_LOG(UBL_DEBUG, "item=%d is not writable through IPC\n", ipd->item);
 			return -1;
@@ -464,7 +544,7 @@ static int ipc_receive_binarymode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr
 		       __func__, ipd->item, ipd->index, ipd->findex);
 		_CONFPREFIX_ipcserver_lock(IPCSERVER_MUTEX_TOUT_USEC);
 		res=_CONFPREFIX_item_index_update(ipd->item, ipd->index, ipd->findex,
-						  ipd->data, ipd->size);
+						  ipd->data+shsize, ipd->size-shsize);
 		_CONFPREFIX_ipcserver_unlock();
 		if(res){
 			UB_LOG(UBL_WARN, "%s:item=%d , index=%d, findex=%d, can't be updated\n",
@@ -474,9 +554,9 @@ static int ipc_receive_binarymode(_CONFPREFIX_ipcserver_t *isvd, struct sockaddr
 		if(isvd->update_cb)
 			res=isvd->update_cb(isvd->update_cbdata, ipd->item,
 					    ipd->index, ipd->findex);
-	}else if (ipd->cmd==_CONFPREFIX_IPCCMD_QEVLIST){
+	}else if (ipd->cmd==XL4UNIPAC_IPCCMD_QEVLIST){
 		return ipc_sendback_to_query_evlist(isvd, false, addr);
-	}else if (ipd->cmd==_CONFPREFIX_IPCCMD_DISCONNECT){
+	}else if (ipd->cmd==XL4UNIPAC_IPCCMD_DISCONNECT){
 		return ipc_disconnect(isvd, addr);
 	}else{
 		return -1;
@@ -557,13 +637,13 @@ int _CONFPREFIX_ipcserver_receive(void)
 static int ipcserver_send_notice_ddata(void *cbdata, uint8_t **sdata, int *size,
 				       struct sockaddr *addr)
 {
-	_CONFPREFIX_ipcdata_t *ipd=(_CONFPREFIX_ipcdata_t *)cbdata;
+	xl4unipac_ipcdata_t *ipd=(xl4unipac_ipcdata_t *)cbdata;
 	*sdata=ipc_get_variable_data(isvd, ipd->item, ipd->index, ipd->findex, size, addr, 'N');
 	if(!sdata) return -1;
 	return 0;
 }
 
-int _CONFPREFIX_ipcserver_send_notice(_CONFPREFIX_ipcdata_t *ipd)
+int _CONFPREFIX_ipcserver_send_notice(xl4unipac_ipcdata_t *ipd)
 {
 	if(check_isvd(__func__)) return -1;
 	if(!ipd) return -1;
@@ -571,7 +651,7 @@ int _CONFPREFIX_ipcserver_send_notice(_CONFPREFIX_ipcdata_t *ipd)
 		UB_LOG(UBL_INFO, "%s:not registered item, send data as in ipd\n", __func__);
 		return cb_ipcsocket_server_write(
 			isvd->ipcsd, (uint8_t*)ipd,
-			sizeof(_CONFPREFIX_ipcdata_t)+ipd->size-4, NULL);
+			sizeof(xl4unipac_ipcdata_t)+ipd->size-4, NULL);
 	}
 	return cb_ipcsocket_server_write_ddata(isvd->ipcsd, ipd, ipcserver_send_notice_ddata);
 }
@@ -610,7 +690,7 @@ int _CONFPREFIX_write_config_file(char *fname)
 	int i;
 	FILE *outf;
 	int res=-1;
-	char *vname;
+	const char *vname;
 	void *values=NULL;
 	char *sval=NULL;
 	int tsize;

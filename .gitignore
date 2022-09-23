@@ -41,3 +41,9 @@ xl4unipac_1.0.0_amd64.build
 xl4unipac_1.0.0_amd64.buildinfo
 xl4unipac_1.0.0_amd64.changes
 xl4unipac_1.0.0_amd64.deb
+.cert.json
+.misra.json
+make_cppcheck.mk
+*.deb
+*.pc
+xl4unipac_*

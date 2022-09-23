@@ -21,7 +21,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include "sample_configs.h"
+#include <xl4unibase/unibase.h>
+#include <xl4unibase/unibase_binding.h>
 
 int simple_value_update(void)
 {
@@ -314,6 +317,7 @@ int update_from_conffile(void)
 {
 	ABC_01_t *sv;
 	double fv;
+	ABC_02_t *pv;
 	if(sampleread_config_file("sample_defaults.conf")){
 		printf("failed to update from 'sample_defaults.conf'\n");
 		return -1;
@@ -329,6 +333,9 @@ int update_from_conffile(void)
 	printf("%s\n", (char*)sampleconf_get_item(VALUE_F_04));
 	if(strcmp((char*)sampleconf_get_item(VALUE_F_04),"abcde fghij")) return -1;
 
+	printf("%s\n", (char*)sampleconf_get_item(VALUE_F_05));
+	if(strcmp((char*)sampleconf_get_item(VALUE_F_05),"abc,\"def\"")) return -1;
+
 	sv=(ABC_01_t*)sampleconf_get_item_index(VALUE_R, 3);
 	if(strcmp(sv->f1,"x")) return -1;
 	sv=(ABC_01_t*)sampleconf_get_item_index(VALUE_R, 4);
@@ -337,7 +344,13 @@ int update_from_conffile(void)
 	sv=(ABC_01_t*)sampleconf_get_item_index(VALUE_R, 5);
 	if(strcmp(sv->f1,"x")) return -1;
 	printf("VALUE_R(ABC_01_t) was updated properly\n");
-
+	pv=(ABC_02_t*)sampleconf_get_item_index(VALUE_S, 4);
+	if(pv->NumX!=4 || pv->FlagY!=true || strcmp(pv->StringZ,"pq")){
+		printf("VALUE_S(ABC_02_t) update wrong, NumX=%d,FlagY=%d,StringZ=%s\n",
+		       pv->NumX,pv->FlagY,pv->StringZ);
+		return -1;
+	}
+	printf("VALUE_S(ABC_02_t) was updated properly\n");
 	printf("%s:PASS\n",__func__);
 	return 0;
 }
@@ -375,13 +388,83 @@ int extend_item(void)
 	return 0;
 }
 
+/*
+  persistent variables
+  VALUE_A_06, VALUE_D_01, VALUE_F_03, ABC_01-VALUE_R, ABC_02-VALUE_S
+ */
+int persistent_check(void)
+{
+	int v;
+	ABC_01_t *sv;
+	ABC_02_t *pv;
+	printf("%s\n", __func__);
+	sampleread_config_file("sample_defaults.conf");
+	if(sampleconf_get_intitem(VALUE_A_01)!=1324) return -1;
+	v=9876;
+	sampleconf_set_item(VALUE_A_01, &v);
+	if(sampleconf_get_intitem(VALUE_A_06)!=12) return -1;
+	v=54;
+	sampleconf_set_item(VALUE_A_06, &v);
+	if(sampleconf_get_intitem(VALUE_D_01)!=0x24) return -1;
+	v=0xa5a5b0b0;
+	sampleconf_set_item(VALUE_D_01, &v);
+	// 1 second is PERSISTENT_SAVE_INTERVAL,
+	// after this time it will be saved at any of next write
+	sleep(1);
+	sampleconf_set_item(VALUE_A_02, &v);
+
+	sampleread_config_file("sample_defaults.conf");
+	samplepersistent_restore();
+	// VALUE_A_01 is not persitent
+	if(sampleconf_get_intitem(VALUE_A_01)!=1324) return -1;
+	// VALUE_A_06 is persitent, update value is 54
+	if(sampleconf_get_intitem(VALUE_A_06)!=54) return -1;
+	if(sampleconf_get_intitem(VALUE_D_01)!=0xa5a5b0b0) return -1;
+	printf("%s: simple integer variables work fine\n", __func__);
+
+	sv=sampleconf_get_item(VALUE_R);
+	if(sv[8].f4[0]!=1) return -1;
+	sv[8].f4[0]=10;
+	sampleread_config_file("sample_defaults.conf");
+	sv=sampleconf_get_item(VALUE_R);
+	if(sv[8].f4[0]!=1) return -1; // the data was not saved
+	sv[8].f4[0]=10;
+	samplepersistent_save();
+	sampleread_config_file("sample_defaults.conf");
+	samplepersistent_restore();
+	sv=sampleconf_get_item(VALUE_R);
+	if(sv[8].f4[0]!=10) return -1; // the data was saved
+	printf("%s:VALUE_R okay\n", __func__);
+
+	pv=sampleconf_get_item_index(VALUE_S, 3);
+	if(pv->NumX!=3) return -1;
+	if(strcmp(pv->StringZ,"pq")) return -1;
+	pv->NumX=99;
+	strcpy(pv->StringZ, "xyz");
+	samplepersistent_save();
+	sampleread_config_file("sample_defaults.conf");
+	samplepersistent_restore();
+	pv=sampleconf_get_item_index(VALUE_S, 3);
+	if(pv->NumX!=99) return -1;
+	if(strcmp(pv->StringZ,"xyz")) return -1;
+	printf("%s:VALUE_S okay\n", __func__);
+
+	return 0;
+}
+
 int main(int argc, char* argv[])
 {
+	unibase_init_para_t init_para;
+	ubb_default_initpara(&init_para);
+	init_para.ub_log_initstr=UBL_OVERRIDE_ISTR("4,ubase:45,combase:45,unip:66", "UBL_UNIP");
+	unibase_init(&init_para);
 	if(simple_value_update()) return -1;
 	if(array_update()) return -1;
 	if(struct_update()) return -1;
 	if(get_variable()) return -1;
 	if(update_from_conffile()) return -1;
 	if(extend_item()) return -1;
+	if(persistent_check()) return -1;
+	unibase_close();
 	return 0;
 }

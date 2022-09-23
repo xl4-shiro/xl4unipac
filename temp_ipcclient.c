@@ -84,7 +84,7 @@ static int set_options(ipcoptions_t *ipcopt, int argc, char *argv[])
 static void print_variables(void)
 {
 	int i=0, c=0;
-	char *vstr;
+	const char *vstr;
 	uint8_t ipcon;
 	char *onstr="";
 	while(true){
@@ -113,7 +113,7 @@ static void print_variables(void)
 	printf("----------\n");
 }
 
-static int textmode_cmd_send(int fd, char *sval, char *ud, int index, int findex)
+static int textmode_cmd_send(int fd, const char *sval, char *ud, int index, int findex)
 {
 	char istr[6]={0,};
 	char fstr[6]={0,};
@@ -197,7 +197,8 @@ static int console_cmd_proc(int fd, bool *textmode)
 	int i, lsize, item, index, findex;
 	char line[1500];
 	char *lp=line;
-	char *ep, *sval;
+	char *ep;
+	const char *sval;
 	char *ud=NULL;
 	char *litems[7]={NULL,};
 	lsize=read(0, line, sizeof(line));
@@ -320,7 +321,7 @@ static int read_proc_binarymode(_CONFPREFIX_ipcdata_t *ipd, int size)
 {
 	char istr[6]={0,};
 	char fstr[6]={0,};
-	char *vname;
+	const char *vname;
 	char *vstr;
 	char *cmdt=NULL;
 

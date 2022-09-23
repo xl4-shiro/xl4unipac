@@ -26,6 +26,10 @@
 
 static ub_esarray_cstd_t *item_extends;
 
+#define PERSISTENT_SAVE_INTERVAL (1*UB_SEC_NS)
+static bool persistent_dirty=false;
+static uint64_t persistent_dirty_lastts;
+
 #define MAX_CHARS_PER_LINE 1024
 static int _CONFPREFIX_conf_readline(FILE *inf, char *line)
 {
@@ -211,6 +215,16 @@ static int check_item(int n)
 
 /*_CONF_GENERATED_*/
 
+static void config_set_item_dirty(_CONFPREFIX__config_item_t item)
+{
+	if(item>=_CONFPREFIX_ITEM_EXTEND_BASE || config_item_persistent[item]==0) {
+		persistent_save(false);
+		return;
+	}
+	persistent_dirty=true;
+	persistent_dirty_lastts=ub_mt_gettime64();
+}
+
 void *_CONFPREFIX_conf_get_item(_CONFPREFIX__config_item_t item)
 {
 	if(item>=_CONFPREFIX_ITEM_EXTEND_BASE)
@@ -365,6 +379,7 @@ int _CONFPREFIX_conf_set_item(_CONFPREFIX__config_item_t item, void *v)
 	s=config_value_sizes[item][0]*config_value_sizes[item][1]*config_value_sizes[item][2];
 	p=config_value_pointers[item];
 	memcpy(p, v, s);
+	config_set_item_dirty(item);
 	return 0;
 }
 
@@ -389,6 +404,7 @@ int _CONFPREFIX_conf_set_item_index(_CONFPREFIX__config_item_t item, void *v, in
 	s=config_value_sizes[item][0]*config_value_sizes[item][1];
 	p=config_value_pointers[item]+s*index;
 	memcpy(p, v, s);
+	config_set_item_dirty(item);
 	return 0;
 }
 
@@ -440,6 +456,7 @@ int _CONFPREFIX_item_index_update(int item, int index, int findex, void *values,
 		elnum=_CONFPREFIX_conf_get_item_element_num(((_CONFPREFIX__config_item_t)item));
 		elnum-=index;
 		memcpy(p, values, UB_MIN(_CONFPREFIX_conf_get_item_element_size(((_CONFPREFIX__config_item_t)item))*elnum,sizev));
+		config_set_item_dirty(item);
 		return 0;
 	}
 	return _CONFPREFIX_struct_field_update(vtype, findex, p, values, sizev);
@@ -534,6 +551,44 @@ static int strstructitem_values(int item, int vtype, void **values,
 	return ssize;
 }
 
+static int get_findex(char *sp, char **svalues, int *svalsize)
+{
+	struct_field_names_t *sfvns, *csfns;
+	char *astr, *bstr;
+	int i,len;
+	for(sfvns=struct_fnames_variables;sfvns->sitem>=0;sfvns++){
+		if(memcmp(sp, sfvns->nmstr, strlen(sfvns->nmstr))) continue;
+		for(csfns=config_struct_fnames;csfns->sitem>=0;csfns++){
+			if(csfns->sitem!=sfvns->sitem) continue;
+			for(astr=csfns->nmstr,i=0;astr;i++){
+				bstr=strchr(astr, ',');
+				len=bstr?(int)(bstr-astr):(int)strlen(astr);
+				if(memcmp(astr, *svalues, len)){
+					if(!bstr) break;
+					astr=bstr+1;
+					continue;
+				}
+				*svalues+=len;
+				*svalsize-=len;
+				UB_LOG(UBL_DEBUGV, "%s:found, %s item=%d, len=%d, svalues=%s\n",
+				       __func__, sfvns->nmstr, i, len, *svalues);
+				return i;
+			}
+		}
+	}
+	if(**svalues=='f'){
+		*svalues+=1;
+		*svalsize-=1;
+		i=strtol(*svalues, &astr, 10);
+		*svalsize-=astr-*svalues;
+		*svalues=astr;
+		UB_LOG(UBL_DEBUGV, "%s:found, item=f%d, svalues=%s\n",
+				       __func__, i, *svalues);
+		return i;
+	}
+	return -1;
+}
+
 int _CONFPREFIX_stritem_values(int item, int index, int findex, void **values,
 			       int *foffset, char **svalues, int *svalsize)
 {
@@ -609,6 +664,7 @@ int _CONFPREFIX_stritem_update(int item, int index, int findex, char **svalues, 
 		return -1;
 	}
 	memcpy(p+foffset, values, rsize);
+	config_set_item_dirty(item);
 	free(values);
 	return 0;
 }
@@ -616,7 +672,7 @@ int _CONFPREFIX_stritem_update(int item, int index, int findex, char **svalues, 
 int _CONFPREFIX_variable_from_str(int *item, int *index, int *findex, char **svalues, int *svalsize)
 {
 	int i;
-	char *sp, *q;
+	char *sp;
 	char *ve=NULL;
 	char *vn=NULL;
 	if(index) *index=-1;
@@ -635,14 +691,13 @@ int _CONFPREFIX_variable_from_str(int *item, int *index, int *findex, char **sva
 			if(index) *index=i;
 			continue;
 		}
-		if(strstr(*svalues,".f")==*svalues){
+		if(**svalues=='.'){
 			if(!ve) ve=*svalues;
-			*svalues+=2;
-			*svalsize-=2;
-			i=strtol(*svalues, &q, 10);
+			*svalues+=1;
+			*svalsize-=1;
+			i=get_findex(sp, svalues, svalsize);
+			if(i<0) continue;
 			if(findex) *findex=i;
-			*svalsize-=q-*svalues;
-			*svalues=q;
 			continue;
 		}
 		*svalues+=1;
@@ -717,7 +772,7 @@ int _CONFPREFIX_read_config_buffer(int conf_num, char *conf_array[])
 	return res;
 }
 
-char *_CONFPREFIX_config_item_strings(int item)
+const char *_CONFPREFIX_config_item_strings(int item)
 {
 	if(item>=_CONFPREFIX_ITEM_EXTEND_BASE)
 		return get_extend_item_vname(item-_CONFPREFIX_ITEM_EXTEND_BASE);

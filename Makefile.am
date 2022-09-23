@@ -18,9 +18,9 @@
 # along with Excelfore-unipac.  If not, see
 # <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
 #
-PACKAGENAME=xl4unipac
-VERSION=1.0.0
-DESCRIPTION=Excelfore Universal IPC and Configuration tools
+PACKAGENAME=@PACKAGE_NAME@
+VERSION=@PACKAGE_VERSION@
+DESCRIPTION=@PACKAGE_DESC@
 
 ACLOCAL_AMFLAGS = -I m4
 AM_CFLAGS = -Wall -DUB_LOGCAT=2
@@ -30,10 +30,12 @@ SAMPLE_PREFIX=sample
 if BUILD_IN_STPL
 AM_CFLAGS += -I$(srcdir)/..
 AM_LDFLAGS = -L../xl4unibase/.libs -L../xl4combase/.libs
+XL4_BASELDFLAGS = -lx4unibase -lx4combase
 DOC_DIR = $(abs_srcdir)/../xl4unibase/doc
 else
 AM_CFLAGS += -I$(includedir)/xl4tsn
 AM_LDFLAGS =
+XL4_BASELDFLAGS = $(x4combase_LIBS) $(x4unibase_LIBS)
 DOC_DIR = $(datadir)/xl4unibase
 endif
 
@@ -75,22 +77,22 @@ endif
 
 sample_configs_test_SOURCES = sample_configs.c sample_configs.h sample_configs_test.c
 sample_configs_test_CFLAGS = $(AM_CFLAGS)
-sample_configs_test_LDADD = -lx4unibase -lx4combase
+sample_configs_test_LDADD = $(XL4_BASELDFLAGS)
 
 sample_configs_manual_test_SOURCES = sample_configs.c sample_configs.h \
 sample_configs_manual_test.c
 sample_configs_manual_test_CFLAGS = $(AM_CFLAGS)
-sample_configs_manual_test_LDADD = -lx4unibase -lx4combase
+sample_configs_manual_test_LDADD = $(XL4_BASELDFLAGS)
 
 sample_ipcconfigs_manual_test_SOURCES = sample_ipcconfigs.c sample_ipcconfigs.h \
 sample_configs.c sample_configs.h sample_ipcconfigs_manual_test.c
 sample_ipcconfigs_manual_test_CFLAGS = $(AM_CFLAGS)
-sample_ipcconfigs_manual_test_LDADD = -lx4unibase -lx4combase
+sample_ipcconfigs_manual_test_LDADD = $(XL4_BASELDFLAGS)
 
 sample_ipcclient_SOURCES = sample_ipcconfigs.c sample_ipcconfigs.h \
 sample_configs.c sample_configs.h sample_ipcclient.c
 sample_ipcclient_CFLAGS = $(AM_CFLAGS)
-sample_ipcclient_LDADD = -lx4unibase -lx4combase
+sample_ipcclient_LDADD = $(XL4_BASELDFLAGS)
 
 doc: $(PACKAGENAME)_usersguide.pdf
 TARGET_PDF=$(PACKAGENAME)_usersguide.pdf
